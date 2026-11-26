@@ -1851,9 +1851,21 @@ body.theme-light .immersive-overlay {
   background: rgba(255, 255, 255, 0.78);
 }
 
-.media-card,
+.media-card {
+  contain: layout style paint;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 235px;
+}
+
 .track-row {
   contain: layout style paint;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 56px;
+}
+
+body.page-hidden .ambient-img,
+body.page-hidden .ambient-orb {
+  animation-play-state: paused !important;
 }
 
 body.theme-light .sidebar-scroll::-webkit-scrollbar-thumb,

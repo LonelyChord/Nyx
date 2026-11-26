@@ -782,6 +782,7 @@
 
   let hooked = false;
   let lastTimePush = 0;
+  let lastStatePushAt = 0;
   function attachListeners() {
     const mk = getMK();
     if (!mk || hooked) return Boolean(mk);
@@ -793,18 +794,23 @@
       "authorizationStatusDidChange",
     ]) {
       try {
-        mk.addEventListener(ev, () => pushState(false));
+        mk.addEventListener(ev, () => {
+          lastStatePushAt = Date.now();
+          pushState(false);
+        });
       } catch (_) {}
     }
     try {
       mk.addEventListener("playbackTimeDidChange", () => {
         const now = Date.now();
-        if (now - lastTimePush >= 500) {
+        if (now - lastTimePush >= 1500) {
           lastTimePush = now;
+          lastStatePushAt = now;
           pushState(false);
         }
       });
     } catch (_) {}
+    lastStatePushAt = Date.now();
     pushState(true);
     return true;
   }
@@ -841,8 +847,10 @@
 
   setInterval(() => {
     const mk = getMK();
-    if (mk && mk.isPlaying) {
+    const now = Date.now();
+    if (mk && mk.isPlaying && now - lastStatePushAt >= 3500) {
+      lastStatePushAt = now;
       pushState(false);
     }
-  }, 2500);
+  }, 4000);
 })();

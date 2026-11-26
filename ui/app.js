@@ -299,8 +299,6 @@ function applySettings() {
 
   if (theme !== lastAppliedTheme) {
     lastAppliedTheme = theme;
-    const fav = document.getElementById("app-favicon");
-    if (fav) fav.href = theme === "light" ? "./assets/icon-light.png" : "./assets/icon-dark.png";
     invoke("set_app_theme", { theme }).catch(console.error);
   }
   if (isMiniMode) {
@@ -644,6 +642,8 @@ document.getElementById("btn-clear-cache").addEventListener("click", () => {
     localStorage.removeItem("nyx_cache_library");
     localStorage.removeItem("nyx_cache_profile");
   } catch (_) {}
+  if (typeof lyricsCache !== "undefined") lyricsCache.clear();
+  if (typeof detailCache !== "undefined") detailCache.clear();
   hasCachedHome = false;
   homeLiveLoaded = false;
   homeLoadedAuthed = false;
@@ -1073,6 +1073,7 @@ function switchView(viewName, pushHistory = true) {
   el.immersive.classList.remove("open");
   document.body.classList.remove("immersive-open");
   immersiveOpen = false;
+  if (typeof ensureTickLoop === "function") ensureTickLoop();
 }
 
 el.btnBack.addEventListener("click", () => {
@@ -1095,6 +1096,7 @@ function toggleImmersive(forceState) {
     renderPlaybackFrame();
     updateLyricScrollTarget(true);
   }
+  if (typeof ensureTickLoop === "function") ensureTickLoop();
 }
 
 function readLocalJson(key, fallback = null) {
@@ -1113,6 +1115,7 @@ function writeLocalJson(key, value) {
 }
 
 let cachedProfile = readLocalJson("nyx_cache_profile", { name: "", avatar: "" }) || { name: "", avatar: "" };
+let lastUserPillSig = "";
 
 function renderUserPill() {
   const customName = (settings.displayName || "").trim();
@@ -1122,6 +1125,10 @@ function renderUserPill() {
   const customAvatar = (settings.avatarUrl || "").trim();
   const detectedAvatar = (engineState.userAvatar || cachedProfile.avatar || "").trim();
   const avatarSrc = customAvatar || detectedAvatar;
+
+  const sig = `${displayName}|${avatarSrc}|${customName ? 1 : 0}|${detectedName ? 1 : 0}|${lastAppliedLang}`;
+  if (sig === lastUserPillSig) return;
+  lastUserPillSig = sig;
 
   el.userPillName.textContent = displayName;
   if (avatarSrc) {
@@ -1270,58 +1277,75 @@ function renderSongRows(songs) {
     .join("");
 }
 
+const songCollectionContextMap = new WeakMap();
+const detailCache = new Map();
+const lyricsCache = new Map();
+
 function bindCardEvents(container) {
-  container.querySelectorAll(".media-card").forEach((card) => {
-    card.addEventListener("click", (e) => {
-      const fab = e.target.closest(".card-play-fab");
-      if (fab) {
-        e.stopPropagation();
-        rpc("playItem", { id: fab.dataset.playId, type: fab.dataset.playType }).catch(console.error);
-        return;
-      }
+  if (!container || container.dataset.cardDelegated === "1") return;
+  container.dataset.cardDelegated = "1";
+  container.addEventListener("click", (e) => {
+    const fab = e.target.closest(".card-play-fab");
+    if (fab) {
+      e.stopPropagation();
+      rpc("playItem", { id: fab.dataset.playId, type: fab.dataset.playType }).catch(console.error);
+      return;
+    }
+    const card = e.target.closest(".media-card");
+    if (card) {
       openCollection(card.dataset.type, card.dataset.id);
-    });
-    card.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-      openItemActionMenu(
-        { id: card.dataset.id, type: card.dataset.type, title: card.dataset.name },
-        e.clientX,
-        e.clientY,
-        true
-      );
-    });
+    }
+  });
+  container.addEventListener("contextmenu", (e) => {
+    const card = e.target.closest(".media-card");
+    if (!card) return;
+    e.preventDefault();
+    openItemActionMenu(
+      { id: card.dataset.id, type: card.dataset.type, title: card.dataset.name },
+      e.clientX,
+      e.clientY,
+      true
+    );
   });
 }
 
 function bindSongEvents(container, collectionContext = null) {
-  container.querySelectorAll(".track-row").forEach((row) => {
-    const moreBtn = row.querySelector(".track-row-more");
+  if (!container) return;
+  songCollectionContextMap.set(container, collectionContext);
+  if (container.dataset.songDelegated === "1") return;
+  container.dataset.songDelegated = "1";
+  container.addEventListener("click", (e) => {
+    const moreBtn = e.target.closest(".track-row-more");
     if (moreBtn) {
-      moreBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const rect = moreBtn.getBoundingClientRect();
-        openItemActionMenu(getRowTrackData(row), rect.right - 180, rect.bottom + 6, false);
-      });
+      e.stopPropagation();
+      const row = moreBtn.closest(".track-row");
+      if (!row) return;
+      const rect = moreBtn.getBoundingClientRect();
+      openItemActionMenu(getRowTrackData(row), rect.right - 180, rect.bottom + 6, false);
+      return;
     }
-    row.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-      openItemActionMenu(getRowTrackData(row), e.clientX, e.clientY, false);
-    });
-    row.addEventListener("click", () => {
-      if (collectionContext) {
-        rpc("playItem", {
-          id: collectionContext.id,
-          type: collectionContext.type,
-          startWith: Number(row.dataset.idx || 0),
-          songId: row.dataset.songId || "",
-          catalogId: row.dataset.catalogId || "",
-          title: row.dataset.title || "",
-          artist: row.dataset.artist || "",
-        }).catch(console.error);
-      } else {
-        rpc("playItem", { id: row.dataset.songId, type: row.dataset.songType }).catch(console.error);
-      }
-    });
+    const row = e.target.closest(".track-row");
+    if (!row) return;
+    const ctx = songCollectionContextMap.get(container) || null;
+    if (ctx) {
+      rpc("playItem", {
+        id: ctx.id,
+        type: ctx.type,
+        startWith: Number(row.dataset.idx || 0),
+        songId: row.dataset.songId || "",
+        catalogId: row.dataset.catalogId || "",
+        title: row.dataset.title || "",
+        artist: row.dataset.artist || "",
+      }).catch(console.error);
+    } else {
+      rpc("playItem", { id: row.dataset.songId, type: row.dataset.songType }).catch(console.error);
+    }
+  });
+  container.addEventListener("contextmenu", (e) => {
+    const row = e.target.closest(".track-row");
+    if (!row) return;
+    e.preventDefault();
+    openItemActionMenu(getRowTrackData(row), e.clientX, e.clientY, false);
   });
 }
 
@@ -1374,9 +1398,22 @@ function renderDetailData(d) {
 
 async function openCollection(type, id) {
   switchView("detail");
+  const cacheKey = `${settings.language || "zh-TW"}|${type}|${id}`;
+  const cached = detailCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < 90000) {
+    renderDetailData(cached.detail);
+    return;
+  }
   el.detailContent.innerHTML = `<div class="skeleton-hint">${escapeHtml(t("detail.loading"))}</div>`;
   try {
     const res = await rpc("getCollectionDetail", { type, id, lang: settings.language });
+    if (res && res.detail) {
+      if (detailCache.size >= 20) {
+        const firstKey = detailCache.keys().next().value;
+        if (firstKey !== undefined) detailCache.delete(firstKey);
+      }
+      detailCache.set(cacheKey, { detail: res.detail, ts: Date.now() });
+    }
     renderDetailData(res.detail);
   } catch (err) {
     el.detailContent.innerHTML = `<div class="skeleton-hint">${escapeHtml(t("detail.loadFailed", { msg: err.message }))}</div>`;
@@ -1688,16 +1725,31 @@ async function fetchLyricsForSong(catalogId) {
     el.lyricsScroll.innerHTML = `<div class="lyrics-empty">${escapeHtml(t("imm.lyricsUnavailable"))}</div>`;
     return;
   }
+  if (lyricsCache.has(catalogId)) {
+    lyricLines = lyricsCache.get(catalogId) || [];
+    renderLyricLines();
+    return;
+  }
   el.lyricsScroll.innerHTML = `<div class="lyrics-empty">${escapeHtml(t("imm.lyricsLoading"))}</div>`;
   try {
     const res = await rpc("getLyrics", { catalogId });
-    lyricLines = res.lines || [];
-    renderLyricLines();
+    const lines = res.lines || [];
+    if (lyricsCache.size >= 40) {
+      const firstKey = lyricsCache.keys().next().value;
+      if (firstKey !== undefined) lyricsCache.delete(firstKey);
+    }
+    lyricsCache.set(catalogId, lines);
+    if (currentCatalogId === catalogId) {
+      lyricLines = lines;
+      renderLyricLines();
+    }
   } catch {
-    lyricLines = [];
-    cachedLyricNodes = [];
-    cachedWordNodes = [];
-    el.lyricsScroll.innerHTML = `<div class="lyrics-empty">${escapeHtml(t("imm.lyricsError"))}</div>`;
+    if (currentCatalogId === catalogId) {
+      lyricLines = [];
+      cachedLyricNodes = [];
+      cachedWordNodes = [];
+      el.lyricsScroll.innerHTML = `<div class="lyrics-empty">${escapeHtml(t("imm.lyricsError"))}</div>`;
+    }
   }
 }
 
@@ -1801,6 +1853,9 @@ function syncDiscordPresence(force = false) {
   }).catch(() => {});
 }
 
+let lastAuthSig = "";
+let lastNowPlayingMetaSig = "";
+
 // Listen to Engine State Events
 listen("engine-state", (event) => {
   const st = event.payload || {};
@@ -1821,9 +1876,13 @@ listen("engine-state", (event) => {
     };
     writeLocalJson("nyx_cache_profile", cachedProfile);
   }
-  el.authDot.classList.toggle("ok", Boolean(st.authorized));
-  el.authLabel.textContent = st.authorized ? t("set.auth.connected") : t("set.auth.signInPrompt");
-  if (el.btnLogout) el.btnLogout.classList.toggle("hidden", !st.authorized);
+  const authSig = `${st.authorized ? 1 : 0}|${lastAppliedLang}`;
+  if (authSig !== lastAuthSig) {
+    lastAuthSig = authSig;
+    el.authDot.classList.toggle("ok", Boolean(st.authorized));
+    el.authLabel.textContent = st.authorized ? t("set.auth.connected") : t("set.auth.signInPrompt");
+    if (el.btnLogout) el.btnLogout.classList.toggle("hidden", !st.authorized);
+  }
   renderUserPill();
 
   if (!homeLiveLoaded || (st.authorized && !homeLoadedAuthed)) {
@@ -1879,24 +1938,32 @@ listen("engine-state", (event) => {
 
   const np = st.nowPlaying;
   if (immActionsEl) immActionsEl.classList.toggle("hidden", !np);
-  if (el.titlebarNowPlaying && el.titlebarSongTitle) {
+  const npTitle = np ? (np.title || t("common.unknownSong")) : "";
+  const npArtist = np ? (np.artist || "—") : "";
+  const npAlbum = np ? (np.album || "") : "";
+  const metaSig = np ? `${np.id || ""}|${npTitle}|${npArtist}|${npAlbum}` : "";
+  if (metaSig !== lastNowPlayingMetaSig) {
+    lastNowPlayingMetaSig = metaSig;
+    if (el.titlebarNowPlaying && el.titlebarSongTitle) {
+      if (np) {
+        el.titlebarSongTitle.textContent = npTitle;
+        el.titlebarNowPlaying.classList.add("visible");
+      } else {
+        el.titlebarSongTitle.textContent = "";
+        el.titlebarNowPlaying.classList.remove("visible");
+      }
+    }
     if (np) {
-      el.titlebarSongTitle.textContent = np.title || t("common.unknownSong");
-      el.titlebarNowPlaying.classList.add("visible");
-    } else {
-      el.titlebarSongTitle.textContent = "";
-      el.titlebarNowPlaying.classList.remove("visible");
+      el.dockTitle.textContent = npTitle;
+      el.dockArtist.textContent = npArtist;
+      el.immTitle.textContent = npTitle;
+      el.immArtist.textContent = npArtist;
+      el.immAlbum.textContent = npAlbum;
+      el.miniTitle.textContent = npTitle;
+      el.miniArtist.textContent = npArtist;
     }
   }
   if (np) {
-    el.dockTitle.textContent = np.title || t("common.unknownSong");
-    el.dockArtist.textContent = np.artist || "—";
-    el.immTitle.textContent = np.title || t("common.unknownSong");
-    el.immArtist.textContent = np.artist || "—";
-    el.immAlbum.textContent = np.album || "";
-    el.miniTitle.textContent = np.title || t("common.unknownSong");
-    el.miniArtist.textContent = np.artist || "—";
-
     if (np.bgColor && np.bgColor !== latestArtworkBgColor) {
       latestArtworkBgColor = np.bgColor;
       applyAccentColor();
@@ -2122,36 +2189,81 @@ function renderPlaybackFrame() {
   }
 }
 
+// Adaptive Playback & Karaoke Sync Loop (60fps only for active immersive lyrics, 4Hz for scrubber, 0Hz when paused/hidden)
+let tickIntervalId = 0;
+
+function needHighFpsLoop(now) {
+  return !document.hidden && (
+    (immersiveOpen && lyricLines.length > 0 && engineState.playing && !isMiniMode) ||
+    (lyricScrollActive && now < scrollSettleUntil)
+  );
+}
+
+function stopTickTimers() {
+  if (tickRafId) {
+    cancelAnimationFrame(tickRafId);
+    tickRafId = 0;
+  }
+  if (tickIntervalId) {
+    clearInterval(tickIntervalId);
+    tickIntervalId = 0;
+  }
+}
+
 function tick() {
   tickRafId = 0;
   const now = performance.now();
-  const keepAlive = (engineState.playing || (lyricScrollActive && now < scrollSettleUntil)) && !document.hidden;
-  if (!keepAlive) return;
+  if (!needHighFpsLoop(now)) {
+    ensureTickLoop();
+    return;
+  }
   renderPlaybackFrame();
   tickRafId = requestAnimationFrame(tick);
 }
 
 function ensureTickLoop() {
   const now = performance.now();
-  const shouldRun = (engineState.playing || (lyricScrollActive && now < scrollSettleUntil)) && !document.hidden;
-  if (shouldRun) {
+  if (document.hidden) {
+    stopTickTimers();
+    return;
+  }
+  if (needHighFpsLoop(now)) {
+    if (tickIntervalId) {
+      clearInterval(tickIntervalId);
+      tickIntervalId = 0;
+    }
     if (!tickRafId) {
-      lastFrameAt = performance.now();
+      lastFrameAt = now;
       tickRafId = requestAnimationFrame(tick);
     }
-  } else if (tickRafId) {
-    cancelAnimationFrame(tickRafId);
-    tickRafId = 0;
+  } else if (engineState.playing) {
+    if (tickRafId) {
+      cancelAnimationFrame(tickRafId);
+      tickRafId = 0;
+    }
+    if (!tickIntervalId) {
+      lastFrameAt = now;
+      tickIntervalId = setInterval(() => {
+        if (document.hidden || !engineState.playing) {
+          ensureTickLoop();
+          return;
+        }
+        renderPlaybackFrame();
+      }, 250);
+    }
+  } else {
+    stopTickTimers();
   }
 }
 
 document.addEventListener("visibilitychange", () => {
+  document.body.classList.toggle("page-hidden", document.hidden);
   if (!document.hidden) renderPlaybackFrame();
   ensureTickLoop();
 });
 
 // Auto-Updater State & Actions
-let currentAppVersion = "0.2.0";
+let currentAppVersion = "0.2.1";
 let availableUpdate = null;
 let updateBannerDismissed = false;
 let updaterUiState = { stage: "idle", version: "", pct: null, downloaded: 0, error: "" };
