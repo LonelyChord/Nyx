@@ -43,3 +43,8 @@ Windows 平台上的 Apple Music 桌面客戶端，基於 Tauri v2 打造。
 ```powershell
 cargo build --release --manifest-path src-tauri/Cargo.toml
 ```
+
+## 聲明
+
+Nyx 為非官方的第三方開源專案，與 Apple Inc. 無任何關聯。所有串流內容皆透過 Apple Music 官方網頁版載入，使用前需登入個人有效訂閱帳號。
+
