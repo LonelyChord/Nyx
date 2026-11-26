@@ -341,6 +341,8 @@ const el = {
   libAlbumsGrid: document.getElementById("lib-albums-grid"),
   libSongsCount: document.getElementById("lib-songs-count"),
   libSongsList: document.getElementById("lib-songs-list"),
+  recentSongsCount: document.getElementById("recent-songs-count"),
+  recentSongsList: document.getElementById("recent-songs-list"),
   detailContent: document.getElementById("detail-content"),
   immersive: document.getElementById("immersive-overlay"),
   immArtwork: document.getElementById("imm-artwork"),
@@ -893,7 +895,11 @@ function renderPlaylistModalList() {
           catalogId: target.catalogId || "",
           type: target.type || "songs",
         });
+        invalidateCollectionCache(plId);
         showToast(t("toast.addedToPlaylist", { name: plName }));
+        if (lastDetailData && lastDetailData.id === plId && currentView === "detail") {
+          openCollection(lastDetailData.type || "library-playlists", plId, true);
+        }
       } catch (err) {
         showToast(err && err.message ? err.message : t("toast.addToPlaylistFailed"), true);
       }
@@ -1020,12 +1026,14 @@ if (el.btnLogout) {
         localStorage.removeItem("nyx_cache_home");
         localStorage.removeItem("nyx_cache_library");
         localStorage.removeItem("nyx_cache_profile");
+        localStorage.removeItem("nyx_cache_recent_tracks");
       } catch (_) {}
       engineState.authorized = false;
       engineState.playing = false;
       engineState.nowPlaying = null;
       cachedProfile = { name: "", avatar: "" };
       libraryPlaylists = [];
+      recentTracks = [];
       hasCachedHome = false;
       homeLiveLoaded = false;
       homeLoadedAuthed = false;
@@ -1041,6 +1049,7 @@ if (el.btnLogout) {
       el.libSongsList.innerHTML = "";
       el.libAlbumsCount.textContent = t("lib.albumsCount", { count: 0 });
       el.libSongsCount.textContent = t("lib.songsCount", { count: 0 });
+      if (typeof renderRecentTracks === "function") renderRecentTracks();
       renderUserPill();
       syncDiscordPresence(true);
       showToast(t("toast.signedOut"));
@@ -1073,6 +1082,9 @@ function switchView(viewName, pushHistory = true) {
   el.immersive.classList.remove("open");
   document.body.classList.remove("immersive-open");
   immersiveOpen = false;
+  if (viewName === "recent" && typeof refreshRecentTracks === "function") {
+    refreshRecentTracks();
+  }
   if (typeof ensureTickLoop === "function") ensureTickLoop();
 }
 
@@ -1396,17 +1408,25 @@ function renderDetailData(d) {
   bindSongEvents(document.getElementById("detail-tracks"), { id: d.id, type: d.type });
 }
 
-async function openCollection(type, id) {
+function invalidateCollectionCache(colId) {
+  if (!colId) return;
+  const suffix = `|${colId}`;
+  for (const key of Array.from(detailCache.keys())) {
+    if (key.endsWith(suffix)) detailCache.delete(key);
+  }
+}
+
+async function openCollection(type, id, bypassCache = false) {
   switchView("detail");
   const cacheKey = `${settings.language || "zh-TW"}|${type}|${id}`;
-  const cached = detailCache.get(cacheKey);
+  const cached = !bypassCache ? detailCache.get(cacheKey) : null;
   if (cached && Date.now() - cached.ts < 90000) {
     renderDetailData(cached.detail);
     return;
   }
   el.detailContent.innerHTML = `<div class="skeleton-hint">${escapeHtml(t("detail.loading"))}</div>`;
   try {
-    const res = await rpc("getCollectionDetail", { type, id, lang: settings.language });
+    const res = await rpc("getCollectionDetail", { type, id, lang: settings.language, noCache: bypassCache });
     if (res && res.detail) {
       if (detailCache.size >= 20) {
         const firstKey = detailCache.keys().next().value;
@@ -1454,6 +1474,9 @@ function refreshDynamicLocaleLabels() {
   if (el.libSongsCount && lastSongsCount !== null) {
     el.libSongsCount.textContent = t("lib.songsCount", { count: lastSongsCount });
   }
+  if (typeof renderRecentTracks === "function" && el.recentSongsCount) {
+    renderRecentTracks();
+  }
   if (el.searchSub && lastSearchTerm) {
     el.searchSub.textContent = t("search.sub", { term: lastSearchTerm });
   }
@@ -1497,9 +1520,84 @@ function renderHomeData(res) {
   if (chartSongsEl) bindSongEvents(chartSongsEl);
 }
 
+let recentTracks = [];
+let recentFetching = false;
+
+function getTrackDedupeKey(tr) {
+  if (!tr) return "";
+  const cid = String(tr.catalogId || "").trim();
+  const id = String(tr.id || "").trim();
+  return cid || id || `${String(tr.title || "").trim().toLowerCase()}|${String(tr.artist || "").trim().toLowerCase()}`;
+}
+
+function renderRecentTracks() {
+  if (!el.recentSongsList || !el.recentSongsCount) return;
+  el.recentSongsCount.textContent = t("lib.recentCount", { count: recentTracks.length });
+  if (!recentTracks.length) {
+    el.recentSongsList.innerHTML = `<div class="skeleton-hint">${escapeHtml(t("recent.empty"))}</div>`;
+    return;
+  }
+  el.recentSongsList.innerHTML = renderSongRows(recentTracks);
+  bindSongEvents(el.recentSongsList);
+}
+
+function recordRecentTrack(np) {
+  if (!np || (!np.id && !np.title)) return;
+  const entry = {
+    id: np.id || np.catalogId || "",
+    catalogId: np.catalogId || np.id || "",
+    kind: np.kind || "songs",
+    title: np.title || t("common.unknownSong"),
+    artist: np.artist || "",
+    album: np.album || "",
+    durationMs: Number(np.durationMs || 0),
+    artwork: np.artwork || "",
+    artworkSmall: np.artworkSmall || np.artwork || "",
+  };
+  const key = getTrackDedupeKey(entry);
+  const filtered = recentTracks.filter((item) => getTrackDedupeKey(item) !== key);
+  recentTracks = [entry, ...filtered].slice(0, 60);
+  writeLocalJson("nyx_cache_recent_tracks", recentTracks);
+  renderRecentTracks();
+}
+
+function mergeServerRecentTracks(serverList) {
+  if (!Array.isArray(serverList) || !serverList.length) return;
+  const seen = new Set();
+  const merged = [];
+  for (const item of [...recentTracks, ...serverList]) {
+    const key = getTrackDedupeKey(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(item);
+    if (merged.length >= 60) break;
+  }
+  recentTracks = merged;
+  writeLocalJson("nyx_cache_recent_tracks", recentTracks);
+  renderRecentTracks();
+}
+
+async function refreshRecentTracks() {
+  if (recentFetching || !engineState.authorized) return;
+  recentFetching = true;
+  try {
+    const res = await rpc("getRecentTracks", { lang: settings.language });
+    if (res && Array.isArray(res.tracks)) {
+      mergeServerRecentTracks(res.tracks);
+    }
+  } catch (_) {
+    // Keep existing local history on transient failure
+  } finally {
+    recentFetching = false;
+  }
+}
+
 function renderLibraryData(res) {
   if (!res) return;
   libraryPlaylists = res.playlists || [];
+  if (Array.isArray(res.recentTracks) && res.recentTracks.length) {
+    mergeServerRecentTracks(res.recentTracks);
+  }
 
   if (libraryPlaylists.length) {
     el.sidebarPlaylists.innerHTML = libraryPlaylists
@@ -1540,6 +1638,11 @@ function hydrateBootCaches() {
   if (cachedLib && ((cachedLib.playlists || []).length || (cachedLib.albums || []).length || (cachedLib.songs || []).length)) {
     renderLibraryData(cachedLib);
   }
+  const cachedRecent = readLocalJson("nyx_cache_recent_tracks");
+  if (Array.isArray(cachedRecent) && cachedRecent.length) {
+    recentTracks = cachedRecent.slice(0, 60);
+  }
+  renderRecentTracks();
 }
 
 async function loadHomeAndCharts(force = false) {
@@ -1973,6 +2076,7 @@ listen("engine-state", (event) => {
     if (np.id !== currentSongId) {
       currentSongId = np.id;
       currentCatalogId = np.catalogId || np.id;
+      recordRecentTrack(np);
       syncPlayingTrackHighlight();
       fetchLyricsForSong(currentCatalogId);
     }
@@ -2263,7 +2367,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 // Auto-Updater State & Actions
-let currentAppVersion = "0.2.1";
+let currentAppVersion = "0.2.2";
 let availableUpdate = null;
 let updateBannerDismissed = false;
 let updaterUiState = { stage: "idle", version: "", pct: null, downloaded: 0, error: "" };

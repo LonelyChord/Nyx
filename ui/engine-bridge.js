@@ -255,8 +255,10 @@
     }
   }
 
-  async function apiGet(mk, path, query) {
-    const res = await mk.api.music(path, query || {});
+  async function apiGet(mk, path, query, fetchOptions) {
+    const res = fetchOptions
+      ? await mk.api.music(path, query || {}, fetchOptions)
+      : await mk.api.music(path, query || {});
     return res && res.data ? res.data : res;
   }
 
@@ -275,6 +277,7 @@
     const fetchOptions = {
       method,
       headers: { "Content-Type": "application/json" },
+      cache: "no-store",
     };
     if (body !== undefined) {
       fetchOptions.body = JSON.stringify(body);
@@ -282,18 +285,18 @@
 
     if (mk.api && typeof mk.api.music === "function") {
       try {
-        const res = await mk.api.music(path, query || {}, { fetchOptions });
+        const res = await mk.api.music(path, query || {}, fetchOptions);
+        const status = res && res.response && res.response.status;
+        // Guard against any MusicKit build downgrading a POST mutation to GET 200
+        if (method === "POST" && path.endsWith("/tracks") && status === 200 && Array.isArray(res.data)) {
+          throw new Error("Unexpected GET response for playlist track mutation");
+        }
         return res && res.data !== undefined ? res.data : res;
       } catch (e) {
         if (e && (e.status || (e.message && /40\d|42\d|50\d|unauthoriz|forbidden/i.test(e.message)))) {
           throw e;
         }
       }
-    }
-
-    const lower = method.toLowerCase();
-    if (mk.api && typeof mk.api[lower] === "function") {
-      return mk.api[lower](path, body, query || {});
     }
 
     const devTok = mk.developerToken || "";
@@ -305,6 +308,7 @@
     const resp = await fetch(`https://amp-api.music.apple.com${path}${qs}`, {
       method,
       credentials: "include",
+      cache: "no-store",
       headers: {
         Authorization: `Bearer ${devTok}`,
         "Music-User-Token": userTok,
@@ -563,13 +567,24 @@
         }
         case "addToPlaylist": {
           const playlistId = params.playlistId;
-          const trackId = params.catalogId || params.id;
-          const isLibSong = !params.catalogId && String(params.id || "").startsWith("i.");
-          const trackType = isLibSong || params.type === "library-songs" ? "library-songs" : "songs";
+          const trackId = String(params.catalogId || params.id || "").trim();
+          const isLibSong = trackId.startsWith("i.") || (!params.catalogId && params.type === "library-songs");
+          const trackType = isLibSong ? "library-songs" : "songs";
           if (!playlistId || !trackId) throw new Error("缺少歌單或歌曲識別碼");
-          await apiMutate(mk, "POST", `/v1/me/library/playlists/${playlistId}/tracks`, {}, {
-            data: [{ id: String(trackId), type: trackType }],
-          });
+          try {
+            await apiMutate(mk, "POST", `/v1/me/library/playlists/${playlistId}/tracks`, {}, {
+              data: [{ id: trackId, type: trackType }],
+            });
+          } catch (err) {
+            const fallbackLibId = String(params.id || "").trim();
+            if (fallbackLibId && fallbackLibId.startsWith("i.") && fallbackLibId !== trackId) {
+              await apiMutate(mk, "POST", `/v1/me/library/playlists/${playlistId}/tracks`, {}, {
+                data: [{ id: fallbackLibId, type: "library-songs" }],
+              });
+            } else {
+              throw err;
+            }
+          }
           emitToHost("rpc_result", id, { ok: true });
           break;
         }
@@ -578,13 +593,14 @@
           if (!name) throw new Error("請輸入播放列表名稱");
           const body = { attributes: { name } };
           if (params.trackId) {
-            const isLibSong = !params.catalogId && String(params.trackId).startsWith("i.");
+            const trId = String(params.catalogId || params.trackId).trim();
+            const isLibSong = trId.startsWith("i.") || (!params.catalogId && params.trackType === "library-songs");
             body.relationships = {
               tracks: {
                 data: [
                   {
-                    id: String(params.catalogId || params.trackId),
-                    type: isLibSong || params.trackType === "library-songs" ? "library-songs" : "songs",
+                    id: trId,
+                    type: isLibSong ? "library-songs" : "songs",
                   },
                 ],
               },
@@ -610,9 +626,9 @@
           break;
         }
         case "loveSong": {
-          const isLibSong = !params.catalogId && String(params.id || "").startsWith("i.");
+          const targetId = String(params.catalogId || params.id || "").trim();
+          const isLibSong = targetId.startsWith("i.");
           const ratingType = isLibSong ? "library-songs" : "songs";
-          const targetId = params.catalogId || params.id;
           if (!targetId) throw new Error("缺少歌曲識別碼");
           await apiMutate(mk, "PUT", `/v1/me/ratings/${ratingType}/${targetId}`, {}, {
             type: "ratings",
@@ -708,19 +724,35 @@
         }
         case "getLibrary": {
           if (!mk.isAuthorized) {
-            emitToHost("rpc_result", id, { ok: true, playlists: [], albums: [], songs: [] });
+            emitToHost("rpc_result", id, { ok: true, playlists: [], albums: [], songs: [], recentTracks: [] });
             break;
           }
-          const [pl, al, sg] = await Promise.all([
+          const [pl, al, sg, rc] = await Promise.all([
             apiGet(mk, "/v1/me/library/playlists", { limit: 40 }).catch(() => ({ data: [] })),
             apiGet(mk, "/v1/me/library/albums", { limit: 30 }).catch(() => ({ data: [] })),
             apiGet(mk, "/v1/me/library/songs", { limit: 50 }).catch(() => ({ data: [] })),
+            apiGet(mk, "/v1/me/recent/played/tracks", { limit: 30 }, { cache: "no-store" }).catch(() => ({ data: [] })),
           ]);
           emitToHost("rpc_result", id, {
             ok: true,
             playlists: normalizeCollection(pl && pl.data, "library-playlists"),
             albums: normalizeCollection(al && al.data, "library-albums"),
             songs: normalizeSongs(sg && sg.data),
+            recentTracks: normalizeSongs(rc && rc.data),
+          });
+          break;
+        }
+        case "getRecentTracks": {
+          if (!mk.isAuthorized) {
+            emitToHost("rpc_result", id, { ok: true, tracks: [] });
+            break;
+          }
+          const apiLang = mapApiLang(params && params.lang);
+          const q = apiLang ? { limit: 30, l: apiLang } : { limit: 30 };
+          const rc = await apiGet(mk, "/v1/me/recent/played/tracks", q, { cache: "no-store" }).catch(() => ({ data: [] }));
+          emitToHost("rpc_result", id, {
+            ok: true,
+            tracks: normalizeSongs(rc && rc.data),
           });
           break;
         }
@@ -735,11 +767,24 @@
 
           const apiLang = mapApiLang(params && params.lang);
           const colQuery = apiLang ? { include: "tracks", l: apiLang } : { include: "tracks" };
-          const res = await apiGet(mk, path, colQuery);
+          const isUserLib = colType.startsWith("library-");
+          const fetchOpts = isUserLib || (params && params.noCache) ? { cache: "no-store" } : undefined;
+          const res = await apiGet(mk, path, colQuery, fetchOpts);
           const obj = res && res.data && res.data[0] ? res.data[0] : null;
           if (!obj) throw new Error("找不到專輯或歌單內容");
           const attr = obj.attributes || {};
-          const tracks = normalizeSongs(obj.relationships && obj.relationships.tracks ? obj.relationships.tracks.data : []);
+          const tracksRel = obj.relationships && obj.relationships.tracks ? obj.relationships.tracks : null;
+          const rawTracks = tracksRel && Array.isArray(tracksRel.data) ? [...tracksRel.data] : [];
+          let nextUrl = tracksRel && tracksRel.next ? tracksRel.next : "";
+          let pageCount = 0;
+          while (nextUrl && pageCount < 4) {
+            pageCount++;
+            const pageRes = await apiGet(mk, nextUrl, undefined, fetchOpts).catch(() => null);
+            if (!pageRes || !Array.isArray(pageRes.data) || !pageRes.data.length) break;
+            rawTracks.push(...pageRes.data);
+            nextUrl = pageRes.next || "";
+          }
+          const tracks = normalizeSongs(rawTracks);
           emitToHost("rpc_result", id, {
             ok: true,
             detail: {

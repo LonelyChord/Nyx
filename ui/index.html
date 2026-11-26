@@ -152,6 +152,15 @@
               </span>
               <span data-i18n="nav.songs">歌曲</span>
             </button>
+            <button class="nav-item" data-view="recent">
+              <span class="nav-ico">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="8.5" />
+                  <polyline points="12 7.5 12 12 15 13.8" />
+                </svg>
+              </span>
+              <span data-i18n="nav.recent">最近播放</span>
+            </button>
           </div>
 
           <div class="nav-label" data-i18n="nav.custom">自訂</div>
@@ -292,6 +301,15 @@
                 <span id="lib-songs-count" class="page-sub"></span>
               </div>
               <div id="lib-songs-list" class="track-table"></div>
+            </section>
+
+            <!-- Recently Played Tracks -->
+            <section id="view-recent" class="view">
+              <div class="page-hero">
+                <h1 class="page-title" data-i18n="page.recent">最近播放</h1>
+                <span id="recent-songs-count" class="page-sub"></span>
+              </div>
+              <div id="recent-songs-list" class="track-table"></div>
             </section>
 
             <!-- Collection Detail (Album / Playlist) -->
@@ -636,7 +654,7 @@
                     <div class="update-meta-col">
                       <div class="setting-name update-title-row">
                         <span>Nyx</span>
-                        <span id="app-version-badge" class="version-pill">v0.2.1</span>
+                        <span id="app-version-badge" class="version-pill">v0.2.2</span>
                       </div>
                       <div id="update-status-desc" class="setting-desc" data-i18n="set.updateStatus.idle">自動從 GitHub Releases 檢查最新版本</div>
                       <div id="update-progress-wrap" class="update-progress-wrap hidden">
