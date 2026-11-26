@@ -10,7 +10,15 @@ Windows 平台上的 Apple Music 桌面客戶端，基於 Tauri v2 打造。
 
 [下載最新版本](https://github.com/LonelyChord/Nyx/releases/latest) · [回報問題](https://github.com/LonelyChord/Nyx/issues)
 
+<br>
+
+![Nyx Dark Theme](./docs/preview-dark.jpg)
+
 </div>
+
+| 白色主題 | 即時歌詞 |
+| :---: | :---: |
+| ![Nyx Light Theme](./docs/preview-light.jpg) | ![Nyx Synced Lyrics](./docs/preview-lyrics.jpg) |
 
 ---
 
