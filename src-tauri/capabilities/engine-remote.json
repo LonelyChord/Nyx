@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "engine-remote",
+  "description": "Allow hidden Apple Music MusicKit engine to emit events back to the app",
+  "windows": ["engine"],
+  "local": false,
+  "remote": {
+    "urls": [
+      "https://music.apple.com/*",
+      "https://*.music.apple.com/*"
+    ]
+  },
+  "permissions": [
+    "core:event:default"
+  ]
+}
