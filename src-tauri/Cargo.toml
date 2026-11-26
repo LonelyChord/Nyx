@@ -1,0 +1,15 @@
+[package]
+name = "nyx"
+version = "0.2.0"
+description = "Nyx — Custom Tauri v2 Apple Music desktop client"
+authors = ["Bocchi"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-updater = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

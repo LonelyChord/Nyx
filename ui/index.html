@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nyx</title>
+    <link id="app-favicon" rel="icon" type="image/png" href="./assets/icon-dark.png" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <!-- Dynamic Fluid Blurred Ambient Background (GPU-prebaked canvas) -->
+    <div class="ambient-bg">
+      <canvas id="ambient-img" class="ambient-img" width="160" height="160"></canvas>
+      <div id="ambient-orb-1" class="ambient-orb orb-1"></div>
+      <div id="ambient-orb-2" class="ambient-orb orb-2"></div>
+      <div class="ambient-vignette"></div>
+    </div>
+
+    <!-- Compact Mini Player Mode -->
+    <div id="mini-player" class="mini-player">
+      <div class="mini-cover-wrap">
+        <img id="mini-artwork" class="mini-artwork hidden" alt="" />
+        <div id="mini-placeholder" class="mini-placeholder">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 18V5l12-2v13" />
+            <circle cx="6" cy="18" r="3" />
+            <circle cx="18" cy="16" r="3" />
+          </svg>
+        </div>
+      </div>
+
+      <div class="mini-body">
+        <div class="mini-top">
+          <div class="mini-meta">
+            <div id="mini-title" class="mini-title"></div>
+            <div id="mini-artist" class="mini-artist"></div>
+          </div>
+          <div class="mini-actions">
+            <button id="btn-mini-pin" class="mini-icon-btn" title="切換永遠置頂" data-i18n-title="mini.pin">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 17v5" />
+                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+              </svg>
+            </button>
+            <button id="btn-mini-expand" class="mini-icon-btn" title="還原完整視窗" data-i18n-title="mini.expand">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="15 3 21 3 21 9" />
+                <polyline points="9 21 3 21 3 15" />
+                <line x1="21" y1="3" x2="14" y2="10" />
+                <line x1="3" y1="21" x2="10" y2="14" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="mini-progress-track">
+          <div id="mini-progress-fill" class="mini-progress-fill"></div>
+        </div>
+
+        <div class="mini-controls">
+          <button id="btn-mini-prev" class="t-btn t-small" title="上一首" data-i18n-title="mini.prev">
+            <svg viewBox="0 0 24 24"><path fill="currentColor" d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+          </button>
+          <button id="btn-mini-play" class="t-btn t-main mini-play-btn" title="播放 / 暫停" data-i18n-title="mini.playPause">
+            <svg id="mini-icon-play" viewBox="0 0 24 24"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>
+            <svg id="mini-icon-pause" class="hidden" viewBox="0 0 24 24"><path fill="currentColor" d="M6 19h4V5H6zm8-14v14h4V5z"/></svg>
+          </button>
+          <button id="btn-mini-next" class="t-btn t-small" title="下一首" data-i18n-title="mini.next">
+            <svg viewBox="0 0 24 24"><path fill="currentColor" d="M6 18l8.5-6L6 6zm10-12v12h2V6z"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Unified Outer Shell: Left Sidebar + Top Frame are ONE piece; Right Page floats separately -->
+    <div class="app-shell">
+      <!-- Left Unified Navigation Column (includes Search!) -->
+      <aside class="sidebar">
+        <div class="brand-header">
+          <span class="brand-word">Nyx</span>
+        </div>
+
+        <!-- Search Box inside Sidebar (Web-style) -->
+        <div class="sidebar-search-wrap">
+          <div class="search-pill">
+            <svg viewBox="0 0 24 24" class="search-icon" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2" />
+              <path d="M16.5 16.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            <input
+              id="global-search"
+              type="text"
+              placeholder="搜尋歌曲、專輯、歌單"
+              data-i18n-placeholder="search.placeholder"
+              autocomplete="off"
+            />
+          </div>
+        </div>
+
+        <div class="sidebar-scroll">
+          <div class="nav-section">
+            <button class="nav-item active" data-view="home">
+              <span class="nav-ico">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 10.5 12 3l9 7.5" />
+                  <path d="M5 9.5V19a1.5 1.5 0 0 0 1.5 1.5H10v-5.5h4v5.5h3.5A1.5 1.5 0 0 0 19 19V9.5" />
+                </svg>
+              </span>
+              <span data-i18n="nav.home">首頁</span>
+            </button>
+            <button class="nav-item" data-view="charts">
+              <span class="nav-ico">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3.5" y="3.5" width="7" height="7" rx="1.6" />
+                  <rect x="13.5" y="3.5" width="7" height="7" rx="1.6" />
+                  <rect x="3.5" y="13.5" width="7" height="7" rx="1.6" />
+                  <rect x="13.5" y="13.5" width="7" height="7" rx="1.6" />
+                </svg>
+              </span>
+              <span data-i18n="nav.charts">新發現與排行</span>
+            </button>
+            <button class="nav-item" data-view="search">
+              <span class="nav-ico">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+                  <circle cx="11" cy="11" r="6.5" />
+                  <path d="m16 16 4.5 4.5" />
+                </svg>
+              </span>
+              <span data-i18n="nav.search">搜尋結果</span>
+            </button>
+          </div>
+
+          <div class="nav-label" data-i18n="nav.library">資料庫</div>
+          <div class="nav-section">
+            <button class="nav-item" data-view="library-albums">
+              <span class="nav-ico">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="4" y="4" width="16" height="16" rx="3" />
+                  <circle cx="12" cy="12" r="3" />
+                  <circle cx="12" cy="12" r="0.8" fill="currentColor" stroke="none" />
+                </svg>
+              </span>
+              <span data-i18n="nav.albums">專輯</span>
+            </button>
+            <button class="nav-item" data-view="library-songs">
+              <span class="nav-ico">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 18V5l11-2v13" />
+                  <circle cx="6.5" cy="18" r="2.5" />
+                  <circle cx="17.5" cy="16" r="2.5" />
+                </svg>
+              </span>
+              <span data-i18n="nav.songs">歌曲</span>
+            </button>
+          </div>
+
+          <div class="nav-label" data-i18n="nav.custom">自訂</div>
+          <div class="nav-section">
+            <button class="nav-item" data-view="settings">
+              <span class="nav-ico">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="4" y1="7" x2="20" y2="7" />
+                  <circle cx="9" cy="7" r="2" fill="var(--bg-base)" />
+                  <line x1="4" y1="12" x2="20" y2="12" />
+                  <circle cx="15" cy="12" r="2" fill="var(--bg-base)" />
+                  <line x1="4" y1="17" x2="20" y2="17" />
+                  <circle cx="10" cy="17" r="2" fill="var(--bg-base)" />
+                </svg>
+              </span>
+              <span data-i18n="nav.settings">外觀與設定</span>
+            </button>
+          </div>
+
+          <div class="nav-label" data-i18n="nav.playlists">播放列表</div>
+          <div id="sidebar-playlists" class="nav-section">
+            <div class="sidebar-muted" data-i18n="nav.loadingPlaylists">載入歌單中...</div>
+          </div>
+        </div>
+
+        <!-- Floating Current User Pill (Bottom Left, minimal: avatar + ID only) -->
+        <div class="sidebar-user-wrap">
+          <button id="user-pill" class="user-pill" title="點擊開啟帳號與外觀設定" data-i18n-title="user.pillTitle">
+            <span class="user-avatar-box">
+              <img id="user-pill-img" class="user-avatar-img hidden" alt="" />
+              <span id="user-pill-avatar" class="user-avatar">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20 21a8 8 0 0 0-16 0" />
+                  <circle cx="12" cy="8" r="4" />
+                </svg>
+              </span>
+            </span>
+            <span id="user-pill-name" class="user-pill-name">未登入</span>
+          </button>
+        </div>
+      </aside>
+
+      <!-- Right Side: Unified Top Window Bar + Separated Floating Frosted Page -->
+      <div class="right-column">
+        <header class="titlebar">
+          <div class="titlebar-spacer"></div>
+
+          <div id="titlebar-now-playing" class="titlebar-now-playing">
+            <span id="titlebar-song-title" class="titlebar-song-title"></span>
+          </div>
+
+          <div class="titlebar-right">
+            <button id="btn-mini" class="win-btn" title="迷你置頂模式" data-i18n-title="title.mini" aria-label="迷你置頂模式">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="14" rx="2" />
+                <rect x="12" y="10" width="7" height="5" rx="1" fill="currentColor" stroke="none" />
+              </svg>
+            </button>
+            <button id="btn-lossless" class="win-btn" title="暫停並切換官方 Apple Music 聽無損" data-i18n-title="title.lossless" aria-label="切換官方無損">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="var(--accent)" stroke-width="2.1" stroke-linecap="round">
+                <path d="M4 12h2M8 8v8M12 5v14M16 8v8M18 12h2" />
+              </svg>
+            </button>
+            <div class="window-controls">
+              <button id="btn-min" class="win-btn" title="最小化" data-i18n-title="title.min" aria-label="最小化">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                  <line x1="6" y1="12" x2="18" y2="12" />
+                </svg>
+              </button>
+              <button id="btn-max" class="win-btn" title="最大化" data-i18n-title="title.max" aria-label="最大化">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="5.5" y="5.5" width="13" height="13" rx="2" />
+                </svg>
+              </button>
+              <button id="btn-close" class="win-btn win-close" title="關閉" data-i18n-title="title.close" aria-label="關閉">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <!-- Separated Floating Page Sheet -->
+        <div class="page-frame">
+          <button id="btn-back" class="nav-history-btn" title="返回上一頁" data-i18n-title="title.back" disabled>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
+
+          <div id="update-banner" class="update-banner hidden" role="status">
+            <span class="update-banner-dot" aria-hidden="true"></span>
+            <span id="update-banner-text" class="update-banner-text">發現新版本</span>
+            <button id="btn-banner-install" type="button" class="update-banner-btn" data-i18n="update.bannerInstall">立即更新</button>
+            <button id="btn-banner-dismiss" type="button" class="update-banner-close" title="稍後提醒" data-i18n-title="update.bannerLater" aria-label="稍後提醒">×</button>
+          </div>
+
+          <main id="stage" class="stage">
+            <!-- Home View -->
+            <section id="view-home" class="view active">
+              <div id="home-content" class="stagger-container">
+                <div class="skeleton-hint" data-i18n="home.loading">載入中...</div>
+              </div>
+            </section>
+
+            <!-- Charts View -->
+            <section id="view-charts" class="view">
+              <div class="page-hero">
+                <h1 class="page-title" data-i18n="page.charts">新發現與排行</h1>
+              </div>
+              <div id="charts-content" class="stagger-container"></div>
+            </section>
+
+            <!-- Search View -->
+            <section id="view-search" class="view">
+              <div class="page-hero">
+                <h1 class="page-title" data-i18n="page.search">搜尋</h1>
+                <span id="search-sub" class="page-sub"></span>
+              </div>
+              <div id="search-content" class="stagger-container"></div>
+            </section>
+
+            <!-- Library Albums -->
+            <section id="view-library-albums" class="view">
+              <div class="page-hero">
+                <h1 class="page-title" data-i18n="page.libAlbums">資料庫專輯</h1>
+                <span id="lib-albums-count" class="page-sub"></span>
+              </div>
+              <div id="lib-albums-grid" class="card-grid"></div>
+            </section>
+
+            <!-- Library Songs -->
+            <section id="view-library-songs" class="view">
+              <div class="page-hero">
+                <h1 class="page-title" data-i18n="page.libSongs">資料庫歌曲</h1>
+                <span id="lib-songs-count" class="page-sub"></span>
+              </div>
+              <div id="lib-songs-list" class="track-table"></div>
+            </section>
+
+            <!-- Collection Detail (Album / Playlist) -->
+            <section id="view-detail" class="view">
+              <div id="detail-content"></div>
+            </section>
+
+            <!-- Settings View -->
+            <section id="view-settings" class="view">
+              <div class="page-hero">
+                <h1 class="page-title" data-i18n="page.settings">外觀與設定</h1>
+              </div>
+
+              <div class="settings-grid">
+                <div class="settings-card">
+                  <h3 class="settings-group-title" data-i18n="set.group.account">帳號與個人資料</h3>
+
+                  <div class="setting-row setting-static">
+                    <div class="auth-status-row">
+                      <span id="auth-dot" class="auth-dot"></span>
+                      <div>
+                        <div id="auth-label" class="setting-name" data-i18n="set.auth.connecting">連線引擎中...</div>
+                        <div class="setting-desc" data-i18n="set.auth.desc">透過隱藏的 Apple Music 網頁引擎維持帳號授權與曲庫同步</div>
+                      </div>
+                    </div>
+                    <div class="auth-btn-group">
+                      <button id="btn-auth" class="btn-secondary" data-i18n="set.auth.btn">開啟登入 / 帳號視窗</button>
+                      <button id="btn-logout" class="btn-secondary btn-danger hidden" data-i18n="set.auth.logout">登出帳號</button>
+                    </div>
+                  </div>
+
+                  <div class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.displayName">顯示名稱</div>
+                      <div class="setting-desc" data-i18n="set.displayNameDesc">留空時自動從 Apple Music 讀取</div>
+                    </div>
+                    <input id="set-displayName" type="text" class="setting-text-input" placeholder="自動偵測" data-i18n-placeholder="set.displayNamePlaceholder" />
+                  </div>
+
+                  <div class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.avatarUrl">自訂頭像</div>
+                      <div class="setting-desc" data-i18n="set.avatarUrlDesc">輸入圖片網址或選擇本機圖片覆蓋左下角頭像</div>
+                    </div>
+                    <div class="avatar-input-wrap">
+                      <input id="set-avatarUrl" type="text" class="setting-text-input" placeholder="圖片網址（留空自動）" data-i18n-placeholder="set.avatarUrlPlaceholder" />
+                      <label class="btn-secondary file-pick-btn">
+                        <span data-i18n="set.avatarPick">選圖片</span>
+                        <input id="set-avatarFile" type="file" accept="image/*" class="hidden" />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="settings-card">
+                  <h3 class="settings-group-title" data-i18n="set.group.langFont">語言與字體</h3>
+
+                  <div class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.language">介面語言</div>
+                      <div class="setting-desc" data-i18n="set.languageDesc">切換 Nyx 介面的顯示語言並立即生效</div>
+                    </div>
+                    <select id="set-language" class="setting-select">
+                      <option value="zh-TW">繁體中文</option>
+                      <option value="zh-CN">简体中文</option>
+                      <option value="en">English</option>
+                      <option value="ja">日本語</option>
+                    </select>
+                  </div>
+
+                  <div class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.englishFont">英文字體</div>
+                      <div class="setting-desc" data-i18n="set.englishFontDesc">單獨指定英文與數字的字體風格，中文維持下方字體</div>
+                    </div>
+                    <select id="set-englishFont" class="setting-select">
+                      <option value="default" data-i18n="set.englishFontDefault">跟隨介面字體</option>
+                      <option value="inter">Inter</option>
+                      <option value="plus-jakarta">Plus Jakarta Sans</option>
+                      <option value="dm-sans">DM Sans</option>
+                      <option value="outfit">Outfit</option>
+                      <option value="poppins">Poppins</option>
+                      <option value="bahnschrift">Bahnschrift</option>
+                      <option value="playfair">Playfair Display</option>
+                      <option value="georgia">Georgia</option>
+                      <option value="jetbrains">JetBrains Mono</option>
+                      <option value="custom" data-i18n="set.englishFontCustom">自訂英文字體...</option>
+                    </select>
+                  </div>
+
+                  <div id="custom-english-font-row" class="setting-row hidden">
+                    <div>
+                      <div class="setting-name" data-i18n="set.customEnglishFont">自訂英文字體名稱</div>
+                      <div class="setting-desc" data-i18n="set.customEnglishFontDesc">輸入本機已安裝的英文字體名稱，例如 SF Pro Display、Helvetica Neue</div>
+                    </div>
+                    <input id="set-customEnglishFont" type="text" class="setting-text-input" placeholder="例如：SF Pro Display" data-i18n-placeholder="set.customEnglishFontPlaceholder" />
+                  </div>
+
+                  <div class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.fontFamily">中文字體</div>
+                      <div class="setting-desc" data-i18n="set.fontFamilyDesc">選擇中文與日文字體風格，即時套用到全介面與歌詞</div>
+                    </div>
+                    <select id="set-fontFamily" class="setting-select">
+                      <option value="default" data-i18n="set.fontDefault">系統預設</option>
+                      <option value="noto-sans" data-i18n="set.fontNotoSans">思源黑體</option>
+                      <option value="noto-serif" data-i18n="set.fontNotoSerif">思源宋體</option>
+                      <option value="lxgw-wenkai" data-i18n="set.fontLxgw">霞鶩文楷</option>
+                      <option value="chocolate-sans" data-i18n="set.fontChocolate">朱古力傳承黑體</option>
+                      <option value="cactus-serif" data-i18n="set.fontCactus">仙人掌古典明體</option>
+                      <option value="zen-maru" data-i18n="set.fontZenMaru">圓體風格</option>
+                      <option value="jhenghei" data-i18n="set.fontJhengHei">微軟正黑體</option>
+                      <option value="yahei" data-i18n="set.fontYaHei">微軟雅黑</option>
+                      <option value="kaiti" data-i18n="set.fontKaiti">標楷體</option>
+                      <option value="mingliu" data-i18n="set.fontMingLiu">新細明體</option>
+                      <option value="custom" data-i18n="set.fontCustom">自訂字體名稱...</option>
+                    </select>
+                  </div>
+
+                  <div id="custom-font-row" class="setting-row hidden">
+                    <div>
+                      <div class="setting-name" data-i18n="set.customFont">自訂字體名稱</div>
+                      <div class="setting-desc" data-i18n="set.customFontDesc">輸入 Windows 已安裝的字體名稱，例如 Inter、PingFang TC</div>
+                    </div>
+                    <input id="set-customFont" type="text" class="setting-text-input" placeholder="例如：PingFang TC" data-i18n-placeholder="set.customFontPlaceholder" />
+                  </div>
+
+                  <div class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.fontWeight">文字粗細</div>
+                      <div class="setting-desc" data-i18n="set.fontWeightDesc">覺得字太細發虛時可調高字重</div>
+                    </div>
+                    <select id="set-fontWeight" class="setting-select">
+                      <option value="400" data-i18n="set.weight400">標準 400</option>
+                      <option value="500" data-i18n="set.weight500">清晰適中 500</option>
+                      <option value="600" data-i18n="set.weight600">加粗醒目 600</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="settings-card">
+                  <h3 class="settings-group-title" data-i18n="set.group.appearance">背景與色彩</h3>
+
+                  <div class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.theme">主題配色與應用圖示</div>
+                      <div class="setting-desc" data-i18n="set.themeDesc">切換深色 / 白色外觀並同步更換視窗與工作列圖示</div>
+                    </div>
+                    <div class="theme-choices" role="group" aria-label="主題配色">
+                      <button type="button" class="theme-choice active" data-theme="dark">
+                        <img src="./assets/icon-dark.png" alt="深色主題" class="theme-choice-icon" />
+                        <span data-i18n="set.theme.dark">深色</span>
+                      </button>
+                      <button type="button" class="theme-choice" data-theme="light">
+                        <img src="./assets/icon-light.png" alt="白色主題" class="theme-choice-icon" />
+                        <span data-i18n="set.theme.light">白色</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.animPreset">動畫流暢度檔位</div>
+                      <div class="setting-desc" data-i18n="set.animPresetDesc">調整頁面切換、選單、卡片與歌詞的整體過場手感</div>
+                    </div>
+                    <div class="theme-choices" role="group" aria-label="動畫流暢度檔位">
+                      <button type="button" class="theme-choice anim-choice" data-anim="fast" data-i18n="set.anim.fast">快速</button>
+                      <button type="button" class="theme-choice anim-choice active" data-anim="hybrid" data-i18n="set.anim.hybrid">混合</button>
+                      <button type="button" class="theme-choice anim-choice" data-anim="full" data-i18n="set.anim.full">完整</button>
+                    </div>
+                  </div>
+
+                  <label class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.fluidGlow">流體動態封面背景</div>
+                      <div class="setting-desc" data-i18n="set.fluidGlowDesc">讓背景隨目前歌曲封面緩慢流動與呼吸發光</div>
+                    </div>
+                    <input type="checkbox" id="set-fluidGlow" class="switch-input" />
+                  </label>
+
+                  <label class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.artworkAccent">強調色跟隨專輯主色</div>
+                      <div class="setting-desc" data-i18n="set.artworkAccentDesc">按鈕、側欄高亮與光暈自動取自目前專輯色調</div>
+                    </div>
+                    <input type="checkbox" id="set-artworkAccent" class="switch-input" />
+                  </label>
+
+                  <div id="custom-accent-row" class="setting-row hidden">
+                    <div>
+                      <div class="setting-name" data-i18n="set.customAccent">自訂固定強調色</div>
+                      <div class="setting-desc" data-i18n="set.customAccentDesc">關閉跟隨專輯主色時，指定全介面按鈕與高亮顏色</div>
+                    </div>
+                    <div class="accent-picker-wrap">
+                      <div class="accent-swatches">
+                        <button type="button" class="accent-swatch" data-color="#fa2d48" style="--swatch: #fa2d48" aria-label="Apple Red"></button>
+                        <button type="button" class="accent-swatch" data-color="#ff7a30" style="--swatch: #ff7a30" aria-label="Sunset Orange"></button>
+                        <button type="button" class="accent-swatch" data-color="#0a84ff" style="--swatch: #0a84ff" aria-label="Azure Blue"></button>
+                        <button type="button" class="accent-swatch" data-color="#6366f1" style="--swatch: #6366f1" aria-label="Indigo"></button>
+                        <button type="button" class="accent-swatch" data-color="#bf5af2" style="--swatch: #bf5af2" aria-label="Orchid"></button>
+                        <button type="button" class="accent-swatch" data-color="#10b981" style="--swatch: #10b981" aria-label="Emerald"></button>
+                      </div>
+                      <input type="color" id="set-customAccent" class="accent-color-picker" value="#fa2d48" />
+                    </div>
+                  </div>
+
+                  <label class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.cardMotion">卡片彈性懸停動畫</div>
+                      <div class="setting-desc" data-i18n="set.cardMotionDesc">滑鼠移動到專輯與歌單卡片時浮起放大</div>
+                    </div>
+                    <input type="checkbox" id="set-cardMotion" class="switch-input" />
+                  </label>
+
+                  <div class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.blurStrength">背景模糊強度</div>
+                      <div class="setting-desc"><span data-i18n="set.blurStrengthDescPrefix">調整動態封面背景的虛化半徑：</span><span id="val-blurStrength">95</span> px</div>
+                    </div>
+                    <input type="range" id="set-blurStrength" min="50" max="140" step="5" class="slider setting-range" />
+                  </div>
+                </div>
+
+                <div class="settings-card">
+                  <h3 class="settings-group-title" data-i18n="set.group.lyrics">歌詞與播放視圖</h3>
+
+                  <label class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.karaokeLyrics">逐字卡拉 OK 歌詞動態</div>
+                      <div class="setting-desc" data-i18n="set.karaokeLyricsDesc">當 Apple Music 提供逐字時間軸時，依節奏逐字掃描高亮</div>
+                    </div>
+                    <input type="checkbox" id="set-karaokeLyrics" class="switch-input" />
+                  </label>
+
+                  <label class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.lyricsBlur">歌詞景深模糊效果</div>
+                      <div class="setting-desc" data-i18n="set.lyricsBlurDesc">非當前演唱的歌詞行呈現柔和景深，凸顯目前句</div>
+                    </div>
+                    <input type="checkbox" id="set-lyricsBlur" class="switch-input" />
+                  </label>
+
+                  <div class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.lyricsAlign">歌詞對齊方式</div>
+                      <div class="setting-desc" data-i18n="set.lyricsAlignDesc">選擇沉浸視圖中歌詞的排列與放大中心</div>
+                    </div>
+                    <div class="theme-choices" role="group" aria-label="歌詞對齊方式">
+                      <button type="button" class="theme-choice align-choice active" data-lyrics-align="left" data-i18n="set.lyricsAlign.left">靠左</button>
+                      <button type="button" class="theme-choice align-choice" data-lyrics-align="center" data-i18n="set.lyricsAlign.center">置中</button>
+                    </div>
+                  </div>
+
+                  <div class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.lyricsSize">歌詞字體大小</div>
+                      <div class="setting-desc"><span data-i18n="set.lyricsSizeDescPrefix">沉浸模式下歌詞的文字尺寸：</span><span id="val-lyricsSize">26</span> px</div>
+                    </div>
+                    <input type="range" id="set-lyricsSize" min="20" max="36" step="1" class="slider setting-range" />
+                  </div>
+                </div>
+
+                <div class="settings-card">
+                  <h3 class="settings-group-title" data-i18n="set.group.window">視窗與系統整合</h3>
+
+                  <div class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.miniTheme">迷你置頂模式主題</div>
+                      <div class="setting-desc" data-i18n="set.miniThemeDesc">切換迷你浮窗為預設背景、清透玻璃或桌面高斯模糊</div>
+                    </div>
+                    <select id="set-miniTheme" class="setting-select">
+                      <option value="default" data-i18n="set.miniTheme.default">預設</option>
+                      <option value="transparent" data-i18n="set.miniTheme.transparent">透明</option>
+                      <option value="gaussian" data-i18n="set.miniTheme.gaussian">高斯模糊</option>
+                    </select>
+                  </div>
+
+                  <div class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.miniShape">迷你置頂模式形狀</div>
+                      <div class="setting-desc" data-i18n="set.miniShapeDesc">切換標準矩形或右側大圓弧膠囊造型</div>
+                    </div>
+                    <select id="set-miniShape" class="setting-select">
+                      <option value="default" data-i18n="set.miniShape.default">預設</option>
+                      <option value="capsule" data-i18n="set.miniShape.capsule">流線膠囊</option>
+                    </select>
+                  </div>
+
+                  <div id="mini-opacity-row" class="setting-row hidden">
+                    <div>
+                      <div class="setting-name" data-i18n="set.miniOpacity">迷你模式透明濃度</div>
+                      <div class="setting-desc"><span data-i18n="set.miniOpacityDescPrefix">調整透明主題下的底色濃度 · </span><span id="val-miniOpacity">40</span>%</div>
+                    </div>
+                    <input type="range" id="set-miniOpacity" min="15" max="85" step="1" class="slider setting-range" />
+                  </div>
+
+                  <label class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.miniOnTop">迷你模式永遠置頂</div>
+                      <div class="setting-desc" data-i18n="set.miniOnTopDesc">切換到迷你浮窗時自動釘選在所有視窗最上層</div>
+                    </div>
+                    <input type="checkbox" id="set-miniOnTop" class="switch-input" />
+                  </label>
+
+                  <label class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.discordRpc">Discord 正在聆聽狀態</div>
+                      <div class="setting-desc" data-i18n="set.discordRpcDesc">自動在 Discord 個人狀態顯示目前播放的歌曲、封面與進度</div>
+                    </div>
+                    <input type="checkbox" id="set-discordRpc" class="switch-input" />
+                  </label>
+
+                  <div id="discord-id-row" class="setting-row hidden">
+                    <div>
+                      <div class="setting-name" data-i18n="set.discordClientId">Discord 應用程式 ID</div>
+                      <div class="setting-desc" data-i18n="set.discordClientIdDesc">留空使用預設 Nyx 應用程式 ID，或填入自訂 ID</div>
+                    </div>
+                    <input id="set-discordClientId" type="text" class="setting-text-input" placeholder="1575394819176534037" />
+                  </div>
+
+                  <div class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.clearCache">清除本地快取</div>
+                      <div class="setting-desc" data-i18n="set.clearCacheDesc">清空首頁與曲庫快取並重新從 Apple Music 同步最新內容</div>
+                    </div>
+                    <button id="btn-clear-cache" class="btn-secondary" data-i18n="set.clearCacheBtn">立即清除</button>
+                  </div>
+
+                  <div class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.resetSettings">重設全部外觀設定</div>
+                      <div class="setting-desc" data-i18n="set.resetSettingsDesc">恢復所有開關與滑桿為預設推薦值</div>
+                    </div>
+                    <button id="btn-reset-settings" class="btn-secondary" data-i18n="set.resetSettingsBtn">恢復預設</button>
+                  </div>
+                </div>
+
+                <div class="settings-card">
+                  <h3 class="settings-group-title" data-i18n="set.group.updates">版本與自動更新</h3>
+
+                  <div class="setting-row setting-static">
+                    <div class="update-meta-col">
+                      <div class="setting-name update-title-row">
+                        <span>Nyx</span>
+                        <span id="app-version-badge" class="version-pill">v0.2.0</span>
+                      </div>
+                      <div id="update-status-desc" class="setting-desc" data-i18n="set.updateStatus.idle">自動從 GitHub Releases 檢查最新版本</div>
+                      <div id="update-progress-wrap" class="update-progress-wrap hidden">
+                        <div id="update-progress-fill" class="update-progress-fill"></div>
+                      </div>
+                    </div>
+                    <div class="update-actions">
+                      <button id="btn-check-update" type="button" class="btn-secondary" data-i18n="set.checkUpdateBtn">檢查更新</button>
+                      <button id="btn-install-update" type="button" class="btn-play-all btn-update-install hidden" data-i18n="set.installUpdateBtn">立即更新並重啟</button>
+                    </div>
+                  </div>
+
+                  <label class="setting-row">
+                    <div>
+                      <div class="setting-name" data-i18n="set.autoCheckUpdate">啟動時自動檢查更新</div>
+                      <div class="setting-desc" data-i18n="set.autoCheckUpdateDesc">每次開啟 Nyx 時在背景檢查是否有新版可更新</div>
+                    </div>
+                    <input type="checkbox" id="set-autoCheckUpdate" class="switch-input" />
+                  </label>
+                </div>
+              </div>
+            </section>
+          </main>
+
+          <!-- Immersive Now Playing + Synced Karaoke Lyrics Overlay (inside separated page!) -->
+          <div id="immersive-overlay" class="immersive-overlay">
+            <div class="immersive-topbar">
+              <div class="immersive-tabs">
+                <button class="imm-tab active" data-imm="lyrics" data-i18n="imm.tab.lyrics">即時歌詞</button>
+                <button class="imm-tab" data-imm="queue" data-i18n="imm.tab.queue">待播清單</button>
+              </div>
+              <button id="btn-close-immersive" class="imm-close" title="收合視圖" data-i18n-title="imm.close">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+            </div>
+
+            <div class="immersive-body">
+              <div class="imm-left">
+                <div class="imm-cover-wrap">
+                  <img id="imm-artwork" class="imm-artwork hidden" alt="" />
+                  <div id="imm-placeholder" class="imm-placeholder">
+                    <svg viewBox="0 0 24 24" width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M9 18V5l12-2v13" />
+                      <circle cx="6" cy="18" r="3" />
+                      <circle cx="18" cy="16" r="3" />
+                    </svg>
+                  </div>
+                </div>
+                <h2 id="imm-title" class="imm-title"></h2>
+                <p id="imm-artist" class="imm-artist"></p>
+                <p id="imm-album" class="imm-album"></p>
+                <div id="imm-actions" class="imm-actions hidden">
+                  <button id="btn-imm-add-pl" class="imm-act-btn" title="加入到播放列表" data-i18n-title="imm.addToPlTitle">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    <span data-i18n="imm.addToPl">加入歌單</span>
+                  </button>
+                  <button id="btn-imm-more" class="imm-act-btn imm-act-icon" title="更多歌曲操作" data-i18n-title="imm.moreTitle">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+                  </button>
+                </div>
+              </div>
+
+              <div class="imm-right">
+                <div id="imm-pane-lyrics" class="imm-pane active">
+                  <div id="lyrics-scroll" class="lyrics-scroll">
+                    <div class="lyrics-empty" data-i18n="imm.lyricsEmptyIdle">播放歌曲後，這裡會自動顯示同步歌詞</div>
+                  </div>
+                </div>
+                <div id="imm-pane-queue" class="imm-pane">
+                  <div id="queue-scroll" class="queue-scroll"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bottom Floating Bar: Playbar Capsule + Bottom-Right User Pill -->
+          <footer class="bottom-floating-bar">
+            <div class="playbar-capsule">
+              <div id="dock-track-trigger" class="dock-left" title="點擊展開沉浸歌詞" data-i18n-title="dock.expandTitle">
+                <div class="dock-cover-box">
+                  <img id="dock-artwork" class="dock-artwork hidden" alt="" />
+                  <div id="dock-placeholder" class="dock-placeholder">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M9 18V5l12-2v13" />
+                      <circle cx="6" cy="18" r="3" />
+                      <circle cx="18" cy="16" r="3" />
+                    </svg>
+                  </div>
+                </div>
+                <div class="dock-meta">
+                  <div id="dock-title" class="dock-title"></div>
+                  <div id="dock-artist" class="dock-artist"></div>
+                </div>
+              </div>
+
+              <div class="dock-center">
+                <div class="transport-row">
+                  <button id="btn-shuffle" class="t-btn t-small" title="隨機播放" data-i18n-title="dock.shuffleTitle">
+                    <svg viewBox="0 0 24 24"><path fill="currentColor" d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg>
+                  </button>
+                  <button id="btn-prev" class="t-btn" title="上一首" data-i18n-title="mini.prev">
+                    <svg viewBox="0 0 24 24"><path fill="currentColor" d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+                  </button>
+                  <button id="btn-play" class="t-btn t-main" title="播放 / 暫停" data-i18n-title="mini.playPause">
+                    <svg id="icon-play" viewBox="0 0 24 24"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>
+                    <svg id="icon-pause" class="hidden" viewBox="0 0 24 24"><path fill="currentColor" d="M6 19h4V5H6zm8-14v14h4V5z"/></svg>
+                  </button>
+                  <button id="btn-next" class="t-btn" title="下一首" data-i18n-title="mini.next">
+                    <svg viewBox="0 0 24 24"><path fill="currentColor" d="M6 18l8.5-6L6 6zm10-12v12h2V6z"/></svg>
+                  </button>
+                  <button id="btn-repeat" class="t-btn t-small" title="重複播放" data-i18n-title="dock.repeatTitle">
+                    <svg viewBox="0 0 24 24"><path fill="currentColor" d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>
+                  </button>
+                </div>
+                <div class="scrubber-row">
+                  <span id="time-cur" class="time-text">0:00</span>
+                  <input id="progress-slider" type="range" min="0" max="1000" value="0" class="slider progress-slider" />
+                  <span id="time-tot" class="time-text">0:00</span>
+                </div>
+              </div>
+
+              <div class="dock-right">
+                <button id="btn-dock-more" class="t-btn t-small" title="目前歌曲操作（加入歌單／資料庫）" data-i18n-title="dock.moreTitle">
+                  <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="19" cy="12" r="2" fill="currentColor"/></svg>
+                </button>
+                <button id="btn-lyrics" class="t-btn t-small" title="沉浸歌詞與待播清單" data-i18n-title="dock.lyricsTitle">
+                  <svg viewBox="0 0 24 24"><path fill="currentColor" d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-3 10H7v-2h10v2zm-4 4H7v-2h6v2zm4-8H7V6h10v2z"/></svg>
+                </button>
+                <input id="volume-slider" type="range" min="0" max="100" value="100" class="slider vol-slider" title="音量" data-i18n-title="dock.volumeTitle" />
+              </div>
+            </div>
+          </footer>
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating Song / Collection Context Menu -->
+    <div id="action-menu" class="action-menu hidden" role="menu"></div>
+
+    <!-- Add to Playlist Modal -->
+    <div id="playlist-modal" class="pl-modal-backdrop hidden">
+      <div class="pl-modal" role="dialog" aria-modal="true" aria-labelledby="pl-modal-title">
+        <div class="pl-modal-head">
+          <div>
+            <h3 id="pl-modal-title" class="pl-modal-title" data-i18n="plModal.title">加入到播放列表</h3>
+            <div id="pl-modal-song" class="pl-modal-song"></div>
+          </div>
+          <button id="btn-close-pl-modal" class="imm-close" title="關閉" data-i18n-title="plModal.close">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <line x1="6" y1="6" x2="18" y2="18" />
+              <line x1="18" y1="6" x2="6" y2="18" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="pl-create-row">
+          <input id="pl-new-name" type="text" class="setting-text-input pl-new-input" placeholder="輸入新播放列表名稱..." data-i18n-placeholder="plModal.newPlaceholder" />
+          <button id="btn-pl-create" class="btn-secondary pl-create-btn" data-i18n="plModal.createBtn">新建並加入</button>
+        </div>
+
+        <div id="pl-modal-list" class="pl-modal-list"></div>
+      </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+    <script src="./i18n.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
