@@ -14,16 +14,13 @@ use tauri::{
 use tauri_plugin_updater::UpdaterExt;
 
 const ENGINE_BRIDGE_JS: &str = include_str!("../../ui/engine-bridge.js");
-const ICON_DARK_RGBA: &[u8] = include_bytes!("../icons/icon-dark.rgba");
 const ICON_LIGHT_RGBA: &[u8] = include_bytes!("../icons/icon-light.rgba");
-#[cfg(target_os = "windows")]
-const ICON_DARK_PNG: &[u8] = include_bytes!("../icons/icon-dark.png");
 #[cfg(target_os = "windows")]
 const ICON_LIGHT_PNG: &[u8] = include_bytes!("../icons/icon-light.png");
 
 #[cfg(target_os = "windows")]
 mod win_icon {
-    use super::{ICON_DARK_PNG, ICON_LIGHT_PNG};
+    use super::ICON_LIGHT_PNG;
     use std::ffi::c_void;
     use std::sync::Mutex;
 
@@ -45,8 +42,8 @@ mod win_icon {
         fn DestroyIcon(hicon: *mut c_void) -> i32;
     }
 
-    pub fn apply_theme_icon(hwnd: *mut c_void, is_light: bool) {
-        let png = if is_light { ICON_LIGHT_PNG } else { ICON_DARK_PNG };
+    pub fn apply_light_icon(hwnd: *mut c_void) {
+        let png = ICON_LIGHT_PNG;
         unsafe {
             let h_big = CreateIconFromResourceEx(
                 png.as_ptr(),
@@ -115,21 +112,10 @@ fn opaque_bg_color(is_light: bool) -> Color {
 fn set_app_theme(app: AppHandle, theme: String) -> Result<(), String> {
     let is_light = theme == "light";
     let native_theme = if is_light { Theme::Light } else { Theme::Dark };
-    let icon_rgba = if is_light { ICON_LIGHT_RGBA } else { ICON_DARK_RGBA };
 
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.set_theme(Some(native_theme));
         let _ = win.set_background_color(Some(opaque_bg_color(is_light)));
-        let _ = win.set_icon(tauri::image::Image::new(icon_rgba, 256, 256));
-        #[cfg(target_os = "windows")]
-        {
-            let win_clone = win.clone();
-            let _ = win.run_on_main_thread(move || {
-                if let Ok(hwnd) = win_clone.hwnd() {
-                    win_icon::apply_theme_icon(hwnd.0, is_light);
-                }
-            });
-        }
     }
     if let Some(engine) = app.get_webview_window("engine") {
         let _ = engine.set_theme(Some(native_theme));
@@ -546,10 +532,10 @@ fn main() {
                 .build()?;
 
             let _ = main_win.set_background_color(Some(opaque_bg_color(false)));
-            let _ = main_win.set_icon(tauri::image::Image::new(ICON_DARK_RGBA, 256, 256));
+            let _ = main_win.set_icon(tauri::image::Image::new(ICON_LIGHT_RGBA, 256, 256));
             #[cfg(target_os = "windows")]
             if let Ok(hwnd) = main_win.hwnd() {
-                win_icon::apply_theme_icon(hwnd.0, false);
+                win_icon::apply_light_icon(hwnd.0);
             }
 
             let app_handle = app.handle().clone();
