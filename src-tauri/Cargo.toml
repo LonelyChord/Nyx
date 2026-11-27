@@ -1,6 +1,6 @@
 [package]
 name = "nyx"
-version = "0.2.3"
+version = "0.2.4"
 description = "Nyx — Custom Tauri v2 Apple Music desktop client"
 authors = ["Bocchi"]
 edition = "2021"

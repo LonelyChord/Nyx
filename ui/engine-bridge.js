@@ -393,6 +393,9 @@
     if (kind === "playlists" || kind === "playlist" || kind === "library-playlists") {
       return { playlist: targetId };
     }
+    if (kind === "stations" || kind === "station") {
+      return { station: targetId };
+    }
     return { song: targetId };
   }
 
@@ -427,18 +430,40 @@
     return -1;
   }
 
+  function stripSimpleHtml(str) {
+    return String(str || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  }
+
   function normalizeCollection(items, defaultType) {
     if (!Array.isArray(items)) return [];
     return items.map((item) => {
       const attr = item.attributes || {};
+      const type = item.type || defaultType || "albums";
+      const editorialShort = attr.editorialNotes ? (attr.editorialNotes.short || attr.editorialNotes.tagline || "") : "";
       return {
         id: item.id || "",
-        type: item.type || defaultType || "albums",
+        type,
         name: attr.name || "",
-        subtitle: attr.artistName || (attr.curatorName || ""),
+        subtitle: attr.artistName || attr.curatorName || (type === "stations" ? stripSimpleHtml(editorialShort) : ""),
         artwork: formatArtwork(attr.artwork, 320),
         trackCount: attr.trackCount || 0,
         playParams: attr.playParams || null,
+      };
+    });
+  }
+
+  function normalizeArtists(items) {
+    if (!Array.isArray(items)) return [];
+    const genericGenres = new Set(["Music", "音樂", "音乐", "ミュージック"]);
+    return items.map((item) => {
+      const attr = item.attributes || {};
+      const genres = Array.isArray(attr.genreNames) ? attr.genreNames.filter((g) => g && !genericGenres.has(g)) : [];
+      return {
+        id: item.id || "",
+        type: "artists",
+        name: attr.name || "",
+        subtitle: genres[0] || "",
+        artwork: formatArtwork(attr.artwork, 320),
       };
     });
   }
@@ -520,6 +545,22 @@
         case "playItem": {
           const kind = params.type || "song";
           const targetId = params.id;
+          if (kind === "stations" || kind === "station") {
+            mk.shuffleMode = 0;
+            activeCollectionKey = "";
+            try {
+              await mk.setQueue({ station: targetId, startPlaying: true });
+            } catch (_) {
+              const stRes = await apiGet(mk, `/v1/catalog/${sf}/stations/${targetId}`);
+              const stObj = stRes && stRes.data && stRes.data[0];
+              if (!stObj) throw new Error("找不到該 Apple Music 電台");
+              await mk.setQueue({ station: stObj.id || targetId, startPlaying: true });
+            }
+            await mk.play();
+            pushState(true);
+            emitToHost("rpc_result", id, { ok: true });
+            break;
+          }
           const isCollection =
             kind === "albums" ||
             kind === "album" ||
@@ -612,6 +653,47 @@
           await mk.play();
           pushState(true);
           emitToHost("rpc_result", id, { ok: true });
+          break;
+        }
+        case "playTrackList": {
+          const songIds = Array.isArray(params.ids) ? params.ids.map(String).filter(Boolean) : [];
+          if (!songIds.length) throw new Error("沒有可播放的歌曲");
+          const startIdx = Math.max(0, Math.min(songIds.length - 1, Number(params.startWith || 0)));
+          const doShuffle = params.shuffle === true;
+          mk.shuffleMode = 0;
+          await mk.setQueue({
+            songs: songIds,
+            startWith: doShuffle && songIds.length > 1 ? Math.floor(Math.random() * songIds.length) : startIdx,
+            startPlaying: false,
+          });
+          activeCollectionKey = "";
+          if (doShuffle) mk.shuffleMode = 1;
+          await mk.play();
+          pushState(true);
+          emitToHost("rpc_result", id, { ok: true });
+          break;
+        }
+        case "startTrackStation": {
+          let songId = String(params.catalogId || params.id || "").trim();
+          if (!songId) throw new Error("缺少歌曲識別碼");
+          if (songId.startsWith("i.")) {
+            const catRes = await apiGet(mk, `/v1/me/library/songs/${songId}/catalog`).catch(() => null);
+            const catItem = catRes && catRes.data && catRes.data[0];
+            if (catItem && catItem.id) songId = String(catItem.id);
+          }
+          const stRes = await apiGet(mk, `/v1/catalog/${sf}/songs/${songId}/station`);
+          const stObj = stRes && stRes.data && stRes.data[0];
+          if (!stObj || !stObj.id) throw new Error("此歌曲暫時無法建立電台");
+          mk.shuffleMode = 0;
+          activeCollectionKey = "";
+          await mk.setQueue({ station: stObj.id, startPlaying: true });
+          await mk.play();
+          pushState(true);
+          emitToHost("rpc_result", id, {
+            ok: true,
+            stationId: stObj.id,
+            stationName: (stObj.attributes && stObj.attributes.name) || "",
+          });
           break;
         }
         case "playNext": {
@@ -765,13 +847,13 @@
         case "search": {
           const term = String(params.term || "").trim();
           if (!term) {
-            emitToHost("rpc_result", id, { ok: true, songs: [], albums: [], playlists: [] });
+            emitToHost("rpc_result", id, { ok: true, songs: [], artists: [], albums: [], playlists: [], stations: [] });
             break;
           }
           const apiLang = mapApiLang(params && params.lang);
           const searchQuery = {
             term,
-            types: "songs,albums,playlists",
+            types: "songs,artists,albums,playlists,stations",
             limit: 16,
           };
           if (apiLang) searchQuery.l = apiLang;
@@ -780,8 +862,10 @@
           emitToHost("rpc_result", id, {
             ok: true,
             songs: normalizeSongs(results.songs && results.songs.data),
+            artists: normalizeArtists(results.artists && results.artists.data),
             albums: normalizeCollection(results.albums && results.albums.data, "albums"),
             playlists: normalizeCollection(results.playlists && results.playlists.data, "playlists"),
+            stations: normalizeCollection(results.stations && results.stations.data, "stations"),
           });
           break;
         }
@@ -858,6 +942,124 @@
               description: attr.description ? (attr.description.standard || attr.description.short || "") : "",
               artwork: formatArtwork(attr.artwork, 600),
               tracks,
+            },
+          });
+          break;
+        }
+        case "getArtistDetail": {
+          const apiLang = mapApiLang(params && params.lang);
+          const wantedName = String(params.artistName || "").trim();
+          const wantedNameLower = wantedName.toLowerCase();
+          let resolvedId = String(params.artistId || "").trim();
+
+          const pickBestArtist = (list) => {
+            if (!Array.isArray(list) || !list.length) return "";
+            if (wantedNameLower) {
+              const exact = list.find((a) => String((a.attributes && a.attributes.name) || "").trim().toLowerCase() === wantedNameLower);
+              if (exact && exact.id) return String(exact.id);
+            }
+            return list[0] && list[0].id ? String(list[0].id) : "";
+          };
+
+          if (!resolvedId && (params.songCatalogId || params.songId)) {
+            let songCid = String(params.songCatalogId || params.songId || "").trim();
+            if (songCid.startsWith("i.")) {
+              const catSongRes = await apiGet(mk, `/v1/me/library/songs/${songCid}/catalog`).catch(() => null);
+              const catSong = catSongRes && catSongRes.data && catSongRes.data[0];
+              songCid = catSong && catSong.id ? String(catSong.id) : "";
+            }
+            if (songCid) {
+              const artRes = await apiGet(mk, `/v1/catalog/${sf}/songs/${songCid}/artists`).catch(() => null);
+              resolvedId = pickBestArtist(artRes && artRes.data);
+            }
+          }
+
+          if (!resolvedId && params.albumId) {
+            let albCid = String(params.albumId || "").trim();
+            if (albCid.startsWith("l.")) {
+              const catAlbRes = await apiGet(mk, `/v1/me/library/albums/${albCid}/catalog`).catch(() => null);
+              const catAlb = catAlbRes && catAlbRes.data && catAlbRes.data[0];
+              albCid = catAlb && catAlb.id ? String(catAlb.id) : "";
+            }
+            if (albCid) {
+              const artRes = await apiGet(mk, `/v1/catalog/${sf}/albums/${albCid}/artists`).catch(() => null);
+              resolvedId = pickBestArtist(artRes && artRes.data);
+            }
+          }
+
+          if (!resolvedId && wantedName) {
+            const q = { term: wantedName, types: "artists", limit: 5 };
+            if (apiLang) q.l = apiLang;
+            const sRes = await apiGet(mk, `/v1/catalog/${sf}/search`, q).catch(() => null);
+            const candidates = sRes && sRes.results && sRes.results.artists ? sRes.results.artists.data : [];
+            resolvedId = pickBestArtist(candidates);
+          }
+
+          if (!resolvedId) {
+            throw new Error("找不到該藝人的資料頁面");
+          }
+
+          const artQuery = {
+            views: "top-songs,full-albums,singles",
+            include: "albums,station",
+          };
+          if (apiLang) artQuery.l = apiLang;
+
+          let artistRes = await apiGet(mk, `/v1/catalog/${sf}/artists/${resolvedId}`, artQuery).catch(() => null);
+          if (!artistRes || !artistRes.data || !artistRes.data[0]) {
+            const fallbackQuery = apiLang ? { include: "albums,station", l: apiLang } : { include: "albums,station" };
+            artistRes = await apiGet(mk, `/v1/catalog/${sf}/artists/${resolvedId}`, fallbackQuery);
+          }
+          const obj = artistRes && artistRes.data && artistRes.data[0];
+          if (!obj) throw new Error("找不到該藝人的資料頁面");
+
+          const attr = obj.attributes || {};
+          const views = obj.views || {};
+          const rels = obj.relationships || {};
+          const genericGenres = new Set(["Music", "音樂", "音乐", "ミュージック"]);
+          const genres = Array.isArray(attr.genreNames)
+            ? attr.genreNames.filter((g) => g && !genericGenres.has(g)).slice(0, 3)
+            : [];
+          const bio = attr.editorialNotes
+            ? stripSimpleHtml(attr.editorialNotes.standard || attr.editorialNotes.short || "")
+            : "";
+          const stationData = rels.station && Array.isArray(rels.station.data) ? rels.station.data[0] : null;
+          const stationId = stationData && stationData.id ? String(stationData.id) : "";
+
+          const topSongs = normalizeSongs(views["top-songs"] && views["top-songs"].data).slice(0, 15);
+          const rawFullAlbums =
+            (views["full-albums"] && Array.isArray(views["full-albums"].data) && views["full-albums"].data.length
+              ? views["full-albums"].data
+              : rels.albums && Array.isArray(rels.albums.data)
+                ? rels.albums.data
+                : []);
+          const rawSingles = views.singles && Array.isArray(views.singles.data) ? views.singles.data : [];
+
+          const dedupeCols = (list) => {
+            const seen = new Set();
+            return normalizeCollection(list, "albums").filter((c) => {
+              if (!c.id || seen.has(c.id)) return false;
+              seen.add(c.id);
+              return true;
+            });
+          };
+
+          const albums = dedupeCols(rawFullAlbums);
+          const albumIds = new Set(albums.map((a) => a.id));
+          const singles = dedupeCols(rawSingles).filter((s) => !albumIds.has(s.id));
+
+          emitToHost("rpc_result", id, {
+            ok: true,
+            artist: {
+              id: obj.id || resolvedId,
+              name: attr.name || wantedName,
+              artwork: formatArtwork(attr.artwork, 600),
+              genres,
+              bio,
+              stationId,
+              topSongs,
+              albums,
+              singles,
             },
           });
           break;

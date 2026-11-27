@@ -746,12 +746,26 @@ function closePlaylistModal() {
   pendingPlaylistTrack = null;
 }
 
+async function playStationCard(stationId, stationName = "") {
+  if (!stationId) return;
+  try {
+    await rpc("playItem", { id: stationId, type: "stations" });
+    showToast(t("toast.playingStation", { name: stationName || t("station.subtitle") }));
+  } catch (err) {
+    showToast((err && err.message) || t("toast.stationFailed"), true);
+  }
+}
+
 async function performTrackAction(action, item) {
-  if (!item || !item.id) return;
+  if (!item || (!item.id && action !== "goToArtist")) return;
   try {
     switch (action) {
       case "playNow":
-        await rpc("playItem", { id: item.id, type: item.type || "songs" });
+        if (item.type === "stations" || item.type === "station") {
+          await playStationCard(item.id, item.title);
+        } else {
+          await rpc("playItem", { id: item.id, type: item.type || "songs" });
+        }
         break;
       case "shuffleNow":
         await rpc("playItem", { id: item.id, type: item.type || "playlists", shuffle: true });
@@ -764,6 +778,21 @@ async function performTrackAction(action, item) {
         await rpc("playLater", { id: item.id, type: item.type || "songs" });
         showToast(t("toast.playLaterAdded", { title: item.title || t("common.itemFallback") }));
         break;
+      case "goToArtist":
+        await openArtist({
+          artistName: item.artist || "",
+          songCatalogId: item.catalogId || "",
+          songId: item.id || "",
+        });
+        break;
+      case "startStation": {
+        const res = await rpc("startTrackStation", {
+          id: item.id,
+          catalogId: item.catalogId || "",
+        });
+        showToast(t("toast.playingStation", { name: (res && res.stationName) || item.title || t("station.subtitle") }));
+        break;
+      }
       case "addToPlaylist":
         await openPlaylistModal(item);
         break;
@@ -794,21 +823,27 @@ function openItemActionMenu(item, clientX, clientY, isCollection = false) {
   if (!actionMenuEl || !item || !item.id) return;
 
   const isLibItem = String(item.type || "").startsWith("library-");
+  const isStation = item.type === "stations" || item.type === "station";
   const rows = [];
   if (isCollection) {
-    rows.push(
-      { action: "playNow", label: t("menu.playNow"), ico: "play" },
-      { action: "shuffleNow", label: t("menu.shuffleNow"), ico: "shuffle" }
-    );
+    rows.push({ action: "playNow", label: t("menu.playNow"), ico: "play" });
+    if (!isStation) {
+      rows.push({ action: "shuffleNow", label: t("menu.shuffleNow"), ico: "shuffle" });
+    }
   }
   rows.push(
     { action: "playNext", label: t("menu.playNext"), ico: "next" },
     { action: "playLater", label: t("menu.playLater"), ico: "later" }
   );
   if (!isCollection) {
+    rows.push({ sep: true });
+    if (item.artist) {
+      rows.push({ action: "goToArtist", label: t("menu.goToArtist"), ico: "artist" });
+    }
+    rows.push({ action: "startStation", label: t("menu.startStation"), ico: "radio" });
     rows.push({ sep: true }, { action: "addToPlaylist", label: t("menu.addToPlaylist"), ico: "playlist" });
   }
-  if (!isLibItem) {
+  if (!isLibItem && !isStation) {
     rows.push({ action: "addToLibrary", label: t("menu.addToLibrary"), ico: "plus" });
   }
   if (!isCollection) {
@@ -820,6 +855,8 @@ function openItemActionMenu(item, clientX, clientY, isCollection = false) {
     shuffle: `<svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg>`,
     next: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>`,
     later: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>`,
+    artist: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>`,
+    radio: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>`,
     playlist: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`,
     plus: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg>`,
     heart: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`,
@@ -1079,9 +1116,21 @@ el.userPill.addEventListener("click", () => {
 });
 
 // View Navigation
-function switchView(viewName, pushHistory = true) {
-  if (pushHistory && currentView !== viewName) {
-    viewHistory.push(currentView);
+function captureCurrentViewEntry() {
+  if (currentView === "detail") {
+    if (currentDetailMode === "artist" && lastArtistData) {
+      return { view: "detail", mode: "artist", data: lastArtistData };
+    }
+    if (currentDetailMode === "collection" && lastDetailData) {
+      return { view: "detail", mode: "collection", data: lastDetailData };
+    }
+  }
+  return currentView;
+}
+
+function switchView(viewName, pushHistory = true, forcePushDetail = false) {
+  if (pushHistory && (currentView !== viewName || (forcePushDetail && currentView === "detail"))) {
+    viewHistory.push(captureCurrentViewEntry());
   }
   currentView = viewName;
   el.btnBack.disabled = viewHistory.length === 0;
@@ -1102,7 +1151,17 @@ function switchView(viewName, pushHistory = true) {
 
 el.btnBack.addEventListener("click", () => {
   const prev = viewHistory.pop();
-  if (prev) switchView(prev, false);
+  if (!prev) return;
+  if (typeof prev === "object" && prev.view === "detail") {
+    switchView("detail", false);
+    if (prev.mode === "artist" && prev.data) {
+      renderArtistDetail(prev.data);
+    } else if (prev.mode === "collection" && prev.data) {
+      renderDetailData(prev.data);
+    }
+  } else if (typeof prev === "string") {
+    switchView(prev, false);
+  }
 });
 
 document.querySelectorAll(".nav-item[data-view]").forEach((btn) => {
@@ -1169,6 +1228,30 @@ function renderUserPill() {
 }
 
 document.getElementById("dock-track-trigger").addEventListener("click", () => toggleImmersive());
+if (el.dockArtist) {
+  el.dockArtist.addEventListener("click", (e) => {
+    const np = engineState.nowPlaying;
+    if (!np || !np.artist) return;
+    e.stopPropagation();
+    openArtist({
+      artistName: np.artist,
+      songCatalogId: np.catalogId || "",
+      songId: np.id || "",
+    });
+  });
+}
+if (el.immArtist) {
+  el.immArtist.addEventListener("click", (e) => {
+    const np = engineState.nowPlaying;
+    if (!np || !np.artist) return;
+    e.stopPropagation();
+    openArtist({
+      artistName: np.artist,
+      songCatalogId: np.catalogId || "",
+      songId: np.id || "",
+    });
+  });
+}
 document.getElementById("btn-dock-more").addEventListener("click", (e) => {
   e.stopPropagation();
   if (!engineState.nowPlaying) {
@@ -1309,20 +1392,35 @@ updateVolumeUi(Number(el.volumeSlider.value || 100));
 // Render Helpers
 function renderCards(items) {
   const playTitle = escapeHtml(t("card.playTitle"));
+  const stationSubFallback = t("station.subtitle");
+  const artistSubFallback = t("artist.genreFallback");
   return items
-    .map(
-      (item, idx) => `
-    <div class="media-card" style="--stagger-i: ${Math.min(idx, 14)}" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(item.type)}" data-name="${escapeHtml(item.name)}">
-      <div class="card-art-wrap">
-        <img class="card-art" src="${escapeHtml(item.artwork)}" loading="lazy" alt="" />
-        <button class="card-play-fab" title="${playTitle}" data-play-id="${escapeHtml(item.id)}" data-play-type="${escapeHtml(item.type)}">
+    .map((item, idx) => {
+      const isArtist = item.type === "artists";
+      const isStation = item.type === "stations" || item.type === "station";
+      const sub = item.subtitle || (isStation ? stationSubFallback : isArtist ? artistSubFallback : "Apple Music");
+      const artHtml = item.artwork
+        ? `<img class="card-art" src="${escapeHtml(item.artwork)}" loading="lazy" alt="" />`
+        : `<div class="card-art-placeholder">${escapeHtml((item.name || "?").slice(0, 1).toUpperCase())}</div>`;
+      const badgeHtml = isStation
+        ? `<span class="station-badge"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49"/></svg>${escapeHtml(t("search.stations"))}</span>`
+        : "";
+      const fabHtml = isArtist
+        ? ""
+        : `<button class="card-play-fab" title="${playTitle}" data-play-id="${escapeHtml(item.id)}" data-play-type="${escapeHtml(item.type)}" data-play-name="${escapeHtml(item.name)}">
           <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>
-        </button>
+        </button>`;
+      return `
+    <div class="media-card${isArtist ? " media-card-artist" : ""}${isStation ? " media-card-station" : ""}" style="--stagger-i: ${Math.min(idx, 14)}" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(item.type)}" data-name="${escapeHtml(item.name)}">
+      <div class="card-art-wrap">
+        ${artHtml}
+        ${badgeHtml}
+        ${fabHtml}
       </div>
       <div class="card-title">${escapeHtml(item.name)}</div>
-      <div class="card-sub">${escapeHtml(item.subtitle || "Apple Music")}</div>
-    </div>`
-    )
+      <div class="card-sub">${escapeHtml(sub)}</div>
+    </div>`;
+    })
     .join("");
 }
 
@@ -1352,6 +1450,7 @@ function syncPlayingTrackHighlight() {
 
 function renderSongRows(songs) {
   const moreTitle = escapeHtml(t("track.moreTitle"));
+  const goArtistTitle = escapeHtml(t("menu.goToArtist"));
   return songs
     .map(
       (s, idx) => `
@@ -1359,7 +1458,7 @@ function renderSongRows(songs) {
       <img class="track-row-art" src="${escapeHtml(s.artworkSmall || s.artwork)}" loading="lazy" alt="" />
       <div class="track-row-main">
         <div class="track-row-title">${escapeHtml(s.title)}</div>
-        <div class="track-row-artist">${escapeHtml(s.artist)}</div>
+        <div class="track-row-artist">${s.artist ? `<button type="button" class="artist-link" title="${goArtistTitle}">${escapeHtml(s.artist)}</button>` : ""}</div>
       </div>
       <div class="track-row-album">${escapeHtml(s.album)}</div>
       <div class="track-row-dur">${formatTimeSec((s.durationMs || 0) / 1000)}</div>
@@ -1382,17 +1481,28 @@ function bindCardEvents(container) {
     const fab = e.target.closest(".card-play-fab");
     if (fab) {
       e.stopPropagation();
-      rpc("playItem", { id: fab.dataset.playId, type: fab.dataset.playType }).catch(console.error);
+      if (fab.dataset.playType === "stations" || fab.dataset.playType === "station") {
+        playStationCard(fab.dataset.playId, fab.dataset.playName || "");
+      } else {
+        rpc("playItem", { id: fab.dataset.playId, type: fab.dataset.playType }).catch(console.error);
+      }
       return;
     }
     const card = e.target.closest(".media-card");
     if (card) {
-      openCollection(card.dataset.type, card.dataset.id);
+      const cType = card.dataset.type || "";
+      if (cType === "artists") {
+        openArtist({ artistId: card.dataset.id, artistName: card.dataset.name });
+      } else if (cType === "stations" || cType === "station") {
+        playStationCard(card.dataset.id, card.dataset.name || "");
+      } else {
+        openCollection(cType, card.dataset.id);
+      }
     }
   });
   container.addEventListener("contextmenu", (e) => {
     const card = e.target.closest(".media-card");
-    if (!card) return;
+    if (!card || card.dataset.type === "artists") return;
     e.preventDefault();
     openItemActionMenu(
       { id: card.dataset.id, type: card.dataset.type, title: card.dataset.name },
@@ -1409,6 +1519,18 @@ function bindSongEvents(container, collectionContext = null) {
   if (container.dataset.songDelegated === "1") return;
   container.dataset.songDelegated = "1";
   container.addEventListener("click", (e) => {
+    const artistBtn = e.target.closest(".artist-link");
+    if (artistBtn) {
+      e.stopPropagation();
+      const row = artistBtn.closest(".track-row");
+      if (!row) return;
+      openArtist({
+        artistName: row.dataset.artist || artistBtn.textContent || "",
+        songCatalogId: row.dataset.catalogId || "",
+        songId: row.dataset.songId || "",
+      });
+      return;
+    }
     const moreBtn = e.target.closest(".track-row-more");
     if (moreBtn) {
       e.stopPropagation();
@@ -1421,7 +1543,13 @@ function bindSongEvents(container, collectionContext = null) {
     const row = e.target.closest(".track-row");
     if (!row) return;
     const ctx = songCollectionContextMap.get(container) || null;
-    if (ctx) {
+    if (ctx && ctx.mode === "trackList" && Array.isArray(ctx.ids) && ctx.ids.length) {
+      rpc("playTrackList", {
+        ids: ctx.ids,
+        startWith: Number(row.dataset.idx || 0),
+        shuffle: false,
+      }).catch(console.error);
+    } else if (ctx) {
       rpc("playItem", {
         id: ctx.id,
         type: ctx.type,
@@ -1445,14 +1573,21 @@ function bindSongEvents(container, collectionContext = null) {
 
 function renderDetailData(d) {
   if (!d) return;
+  currentDetailMode = "collection";
   lastDetailData = d;
   const isLibCol = String(d.type || "").startsWith("library-");
+  const isAlbumCol = d.type === "albums" || d.type === "library-albums";
+  const subText = d.subtitle || "Apple Music";
+  const subHtml =
+    isAlbumCol && d.subtitle
+      ? `<button type="button" id="btn-detail-artist" class="artist-link artist-link-accent" title="${escapeHtml(t("menu.goToArtist"))}">${escapeHtml(d.subtitle)}</button>`
+      : escapeHtml(subText);
   el.detailContent.innerHTML = `
       <div class="detail-hero">
         <img class="detail-art" src="${escapeHtml(d.artwork)}" alt="" />
         <div class="detail-info">
           <h1>${escapeHtml(d.name)}</h1>
-          <div class="detail-sub">${escapeHtml(d.subtitle || "Apple Music")}</div>
+          <div class="detail-sub">${subHtml}</div>
           ${d.description ? `<p class="detail-desc">${escapeHtml(d.description)}</p>` : ""}
           <div class="detail-actions">
             <button id="btn-play-collection" class="btn-play-all">${escapeHtml(t("detail.playAll"))}</button>
@@ -1467,6 +1602,12 @@ function renderDetailData(d) {
       </div>
       <div class="track-table" id="detail-tracks">${renderSongRows(d.tracks)}</div>
     `;
+  const detailArtistBtn = document.getElementById("btn-detail-artist");
+  if (detailArtistBtn) {
+    detailArtistBtn.addEventListener("click", () => {
+      openArtist({ artistName: d.subtitle, albumId: d.id });
+    });
+  }
   document.getElementById("btn-play-collection").addEventListener("click", () => {
     rpc("playItem", { id: d.id, type: d.type, startWith: 0, shuffle: false }).catch(console.error);
   });
@@ -1490,6 +1631,106 @@ function renderDetailData(d) {
   bindSongEvents(document.getElementById("detail-tracks"), { id: d.id, type: d.type });
 }
 
+function renderArtistDetail(artist) {
+  if (!artist) return;
+  currentDetailMode = "artist";
+  lastArtistData = artist;
+  const topSongs = Array.isArray(artist.topSongs) ? artist.topSongs : [];
+  const albums = Array.isArray(artist.albums) ? artist.albums : [];
+  const singles = Array.isArray(artist.singles) ? artist.singles : [];
+  const topSongIds = topSongs.map((s) => s.catalogId || s.id).filter(Boolean);
+  const genresText =
+    Array.isArray(artist.genres) && artist.genres.length ? artist.genres.join(" · ") : t("artist.genreFallback");
+  const avatarHtml = artist.artwork
+    ? `<img class="artist-avatar" src="${escapeHtml(artist.artwork)}" alt="" />`
+    : `<div class="artist-avatar-fallback">${escapeHtml((artist.name || "?").slice(0, 1).toUpperCase())}</div>`;
+
+  el.detailContent.innerHTML = `
+      <div class="artist-hero">
+        <div class="artist-avatar-wrap">${avatarHtml}</div>
+        <div class="detail-info">
+          <h1>${escapeHtml(artist.name)}</h1>
+          <div class="artist-genres">${escapeHtml(genresText)}</div>
+          ${artist.bio ? `<p class="artist-bio">${escapeHtml(artist.bio)}</p>` : ""}
+          <div class="detail-actions">
+            ${topSongIds.length ? `<button id="btn-artist-play-top" class="btn-play-all">${escapeHtml(t("artist.playTop"))}</button>` : ""}
+            ${topSongIds.length > 1 ? `<button id="btn-artist-shuffle-top" class="btn-shuffle-all"><svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg><span>${escapeHtml(t("detail.shuffleAll"))}</span></button>` : ""}
+            ${artist.stationId ? `<button id="btn-artist-station" class="btn-secondary">${escapeHtml(t("artist.stationBtn"))}</button>` : ""}
+          </div>
+        </div>
+      </div>
+      ${topSongs.length ? `<div class="shelf artist-section"><h2 class="shelf-title">${escapeHtml(t("artist.topSongs"))}</h2><div class="track-table" id="artist-top-songs">${renderSongRows(topSongs)}</div></div>` : ""}
+      ${albums.length ? `<div class="shelf artist-section"><h2 class="shelf-title">${escapeHtml(t("artist.albums"))}</h2><div class="card-grid" id="artist-albums-grid">${renderCards(albums)}</div></div>` : ""}
+      ${singles.length ? `<div class="shelf artist-section"><h2 class="shelf-title">${escapeHtml(t("artist.singles"))}</h2><div class="card-grid" id="artist-singles-grid">${renderCards(singles)}</div></div>` : ""}
+    `;
+
+  const playTopBtn = document.getElementById("btn-artist-play-top");
+  if (playTopBtn) {
+    playTopBtn.addEventListener("click", () => {
+      rpc("playTrackList", { ids: topSongIds, startWith: 0, shuffle: false }).catch(console.error);
+    });
+  }
+  const shuffleTopBtn = document.getElementById("btn-artist-shuffle-top");
+  if (shuffleTopBtn) {
+    shuffleTopBtn.addEventListener("click", () => {
+      rpc("playTrackList", { ids: topSongIds, shuffle: true }).catch(console.error);
+    });
+  }
+  const stationBtn = document.getElementById("btn-artist-station");
+  if (stationBtn) {
+    stationBtn.addEventListener("click", () => {
+      playStationCard(artist.stationId, artist.name);
+    });
+  }
+  const topSongsEl = document.getElementById("artist-top-songs");
+  if (topSongsEl) {
+    bindSongEvents(topSongsEl, { mode: "trackList", ids: topSongIds });
+  }
+  const albumsGrid = document.getElementById("artist-albums-grid");
+  if (albumsGrid) bindCardEvents(albumsGrid);
+  const singlesGrid = document.getElementById("artist-singles-grid");
+  if (singlesGrid) bindCardEvents(singlesGrid);
+}
+
+async function openArtist({ artistId = "", artistName = "", songCatalogId = "", songId = "", albumId = "" } = {}) {
+  const cleanId = String(artistId || "").trim();
+  const cleanName = String(artistName || "").trim();
+  if (!cleanId && !cleanName && !songCatalogId && !songId && !albumId) return;
+
+  switchView("detail", true, true);
+  currentDetailMode = "artist";
+  const cacheKey = `${settings.language || "zh-TW"}|artist|${cleanId || cleanName.toLowerCase() || songCatalogId || albumId}`;
+  const cached = detailCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < 120000) {
+    renderArtistDetail(cached.artist);
+    return;
+  }
+  el.detailContent.innerHTML = `<div class="skeleton-hint">${escapeHtml(t("artist.loading"))}</div>`;
+  try {
+    const res = await rpc("getArtistDetail", {
+      artistId: cleanId,
+      artistName: cleanName,
+      songCatalogId,
+      songId,
+      albumId,
+      lang: settings.language,
+    });
+    if (res && res.artist) {
+      if (detailCache.size >= 24) {
+        const firstKey = detailCache.keys().next().value;
+        if (firstKey !== undefined) detailCache.delete(firstKey);
+      }
+      detailCache.set(cacheKey, { artist: res.artist, ts: Date.now() });
+      if (res.artist.id) {
+        detailCache.set(`${settings.language || "zh-TW"}|artist|${res.artist.id}`, { artist: res.artist, ts: Date.now() });
+      }
+      renderArtistDetail(res.artist);
+    }
+  } catch (err) {
+    el.detailContent.innerHTML = `<div class="skeleton-hint">${escapeHtml(t("artist.notFound", { msg: err.message }))}</div>`;
+  }
+}
+
 function invalidateCollectionCache(colId) {
   if (!colId) return;
   const suffix = `|${colId}`;
@@ -1499,7 +1740,16 @@ function invalidateCollectionCache(colId) {
 }
 
 async function openCollection(type, id, bypassCache = false) {
-  switchView("detail");
+  if (type === "stations" || type === "station") {
+    playStationCard(id, "");
+    return;
+  }
+  if (type === "artists") {
+    openArtist({ artistId: id });
+    return;
+  }
+  switchView("detail", true, true);
+  currentDetailMode = "collection";
   const cacheKey = `${settings.language || "zh-TW"}|${type}|${id}`;
   const cached = !bypassCache ? detailCache.get(cacheKey) : null;
   if (cached && Date.now() - cached.ts < 90000) {
@@ -1510,7 +1760,7 @@ async function openCollection(type, id, bypassCache = false) {
   try {
     const res = await rpc("getCollectionDetail", { type, id, lang: settings.language, noCache: bypassCache });
     if (res && res.detail) {
-      if (detailCache.size >= 20) {
+      if (detailCache.size >= 24) {
         const firstKey = detailCache.keys().next().value;
         if (firstKey !== undefined) detailCache.delete(firstKey);
       }
@@ -1530,6 +1780,8 @@ let libraryLiveLoaded = false;
 let libraryFetching = false;
 let lastHomeData = null;
 let lastDetailData = null;
+let lastArtistData = null;
+let currentDetailMode = "collection";
 let lastSearchData = null;
 let lastAlbumsCount = null;
 let lastSongsCount = null;
@@ -1569,7 +1821,8 @@ function refreshDynamicLocaleLabels() {
     el.lyricsScroll.innerHTML = `<div class="lyrics-empty">${escapeHtml(currentSongId ? t("imm.lyricsUnavailable") : t("imm.lyricsEmptyIdle"))}</div>`;
   }
   if (lastHomeData) renderHomeData(lastHomeData);
-  if (lastDetailData) renderDetailData(lastDetailData);
+  if (currentDetailMode === "artist" && lastArtistData) renderArtistDetail(lastArtistData);
+  else if (lastDetailData) renderDetailData(lastDetailData);
   if (lastSearchData) renderSearchData(lastSearchData);
 }
 
@@ -1778,11 +2031,19 @@ async function loadLibrary(force = false) {
 function renderSearchData(res) {
   if (!res) return;
   lastSearchData = res;
+  const hasAny =
+    (res.artists || []).length ||
+    (res.songs || []).length ||
+    (res.albums || []).length ||
+    (res.playlists || []).length ||
+    (res.stations || []).length;
   el.searchContent.innerHTML = `
+        ${(res.artists || []).length ? `<div class="shelf"><h2 class="shelf-title">${escapeHtml(t("search.artists"))}</h2><div class="card-grid">${renderCards(res.artists)}</div></div>` : ""}
         ${(res.songs || []).length ? `<div class="shelf"><h2 class="shelf-title">${escapeHtml(t("search.songs"))}</h2><div class="track-table" id="search-songs">${renderSongRows(res.songs)}</div></div>` : ""}
         ${(res.albums || []).length ? `<div class="shelf"><h2 class="shelf-title">${escapeHtml(t("search.albums"))}</h2><div class="card-grid">${renderCards(res.albums)}</div></div>` : ""}
         ${(res.playlists || []).length ? `<div class="shelf"><h2 class="shelf-title">${escapeHtml(t("search.playlists"))}</h2><div class="card-grid">${renderCards(res.playlists)}</div></div>` : ""}
-        ${!(res.songs || []).length && !(res.albums || []).length && !(res.playlists || []).length ? `<div class="skeleton-hint">${escapeHtml(t("search.empty"))}</div>` : ""}
+        ${(res.stations || []).length ? `<div class="shelf"><h2 class="shelf-title">${escapeHtml(t("search.stations"))}</h2><div class="card-grid">${renderCards(res.stations)}</div></div>` : ""}
+        ${!hasAny ? `<div class="skeleton-hint">${escapeHtml(t("search.empty"))}</div>` : ""}
       `;
   bindCardEvents(el.searchContent);
   const sSongs = document.getElementById("search-songs");
@@ -2160,10 +2421,15 @@ listen("engine-state", (event) => {
       }
     }
     if (np) {
+      const hasArtist = Boolean(np.artist);
       el.dockTitle.textContent = npTitle;
       el.dockArtist.textContent = npArtist;
+      el.dockArtist.classList.toggle("artist-clickable", hasArtist);
+      el.dockArtist.title = hasArtist ? t("menu.goToArtist") : "";
       el.immTitle.textContent = npTitle;
       el.immArtist.textContent = npArtist;
+      el.immArtist.classList.toggle("artist-clickable", hasArtist);
+      el.immArtist.title = hasArtist ? t("menu.goToArtist") : "";
       el.immAlbum.textContent = npAlbum;
       el.miniTitle.textContent = npTitle;
       el.miniArtist.textContent = npArtist;
@@ -2189,6 +2455,8 @@ listen("engine-state", (event) => {
     const qSig = st.queue.map((q) => `${q.id}:${q.isCurrent ? 1 : 0}`).join(",");
     if (qSig !== lastQueueSig) {
       lastQueueSig = qSig;
+      const goArtistTitle = escapeHtml(t("menu.goToArtist"));
+      const moreTitle = escapeHtml(t("track.moreTitle"));
       el.queueScroll.innerHTML = st.queue
         .map(
           (q) => `
@@ -2196,17 +2464,28 @@ listen("engine-state", (event) => {
           <img class="track-row-art" src="${escapeHtml(q.artworkSmall || q.artwork)}" alt="" />
           <div class="track-row-main">
             <div class="track-row-title">${escapeHtml(q.title)}</div>
-            <div class="track-row-artist">${escapeHtml(q.artist)}</div>
+            <div class="track-row-artist">${q.artist ? `<button type="button" class="artist-link" title="${goArtistTitle}">${escapeHtml(q.artist)}</button>` : ""}</div>
           </div>
           <div class="track-row-album">${escapeHtml(q.album)}</div>
           <div class="track-row-dur">${formatTimeSec((q.durationMs || 0) / 1000)}</div>
-          <button type="button" class="track-row-more" title="更多操作">
+          <button type="button" class="track-row-more" title="${moreTitle}">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
           </button>
         </div>`
         )
         .join("");
       el.queueScroll.querySelectorAll(".track-row").forEach((row) => {
+        const artistBtn = row.querySelector(".artist-link");
+        if (artistBtn) {
+          artistBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            openArtist({
+              artistName: row.dataset.artist || artistBtn.textContent || "",
+              songCatalogId: row.dataset.catalogId || "",
+              songId: row.dataset.songId || "",
+            });
+          });
+        }
         const moreBtn = row.querySelector(".track-row-more");
         if (moreBtn) {
           moreBtn.addEventListener("click", (e) => {
