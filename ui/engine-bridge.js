@@ -189,7 +189,16 @@
       const ps = Array.from(doc.querySelectorAll("p"));
       const toMs = (str) => {
         if (!str) return null;
-        const parts = str.trim().split(":").map(Number);
+        const clean = str.trim();
+        if (clean.endsWith("ms")) {
+          const v = parseFloat(clean);
+          return Number.isNaN(v) ? null : Math.round(v);
+        }
+        if (clean.endsWith("s")) {
+          const v = parseFloat(clean);
+          return Number.isNaN(v) ? null : Math.round(v * 1000);
+        }
+        const parts = clean.split(":").map(Number);
         if (parts.some(Number.isNaN)) return null;
         if (parts.length === 3) return Math.round((parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000);
         if (parts.length === 2) return Math.round((parts[0] * 60 + parts[1]) * 1000);
@@ -197,23 +206,77 @@
         return null;
       };
 
+      const collectTimedWords = (container) => {
+        const words = [];
+        let text = "";
+        for (const node of Array.from(container.childNodes)) {
+          if (node.nodeType === 3) {
+            const t = node.textContent || "";
+            if (!t) continue;
+            text += t;
+            if (words.length) {
+              words[words.length - 1].text += t;
+            }
+          } else if (node.nodeType === 1) {
+            const role = node.getAttribute("ttm:role") || node.getAttribute("role") || "";
+            if (role === "x-translation" || role === "x-roman") continue;
+            const nestedSpans = node.querySelectorAll ? Array.from(node.querySelectorAll("span[begin]")) : [];
+            if (node.hasAttribute && node.hasAttribute("begin") && nestedSpans.length === 0) {
+              const ws = toMs(node.getAttribute("begin"));
+              const we = toMs(node.getAttribute("end"));
+              const wt = node.textContent || "";
+              text += wt;
+              if (wt) words.push({ start: ws, end: we, text: wt });
+            } else if (nestedSpans.length > 0) {
+              const inner = collectTimedWords(node);
+              text += inner.text;
+              words.push(...inner.words);
+            } else {
+              const wt = node.textContent || "";
+              text += wt;
+              if (words.length && wt) {
+                words[words.length - 1].text += wt;
+              }
+            }
+          }
+        }
+        return { text, words };
+      };
+
+      let primaryAgent = "";
       return ps
         .map((p) => {
           const begin = toMs(p.getAttribute("begin"));
           const end = toMs(p.getAttribute("end"));
+          const agent = p.getAttribute("ttm:agent") || p.getAttribute("agent") || "";
+          if (agent && !primaryAgent) primaryAgent = agent;
+          const isAltVoice = Boolean(agent && primaryAgent && agent !== primaryAgent && agent !== "v1000");
+
           const words = [];
+          const bgWords = [];
           let lineText = "";
+          let bgText = "";
 
           for (const node of Array.from(p.childNodes)) {
             if (node.nodeType === 3) {
               const t = node.textContent || "";
+              if (!t) continue;
               lineText += t;
-              if (words.length && t) {
+              if (words.length) {
                 words[words.length - 1].text += t;
               }
             } else if (node.nodeType === 1) {
               const role = node.getAttribute("ttm:role") || node.getAttribute("role") || "";
-              if (role === "x-translation") continue;
+              if (role === "x-translation" || role === "x-roman") continue;
+              if (role === "x-bg") {
+                const bg = collectTimedWords(node);
+                const cleanBg = bg.text.trim();
+                if (cleanBg) {
+                  bgText = bgText ? `${bgText} ${cleanBg}` : cleanBg;
+                  if (bg.words.length) bgWords.push(...bg.words);
+                }
+                continue;
+              }
               const spans = node.querySelectorAll ? Array.from(node.querySelectorAll("span[begin]")) : [];
               if (node.hasAttribute && node.hasAttribute("begin") && spans.length === 0) {
                 const ws = toMs(node.getAttribute("begin"));
@@ -222,13 +285,9 @@
                 lineText += wt;
                 if (wt) words.push({ start: ws, end: we, text: wt });
               } else if (spans.length > 0) {
-                for (const sp of spans) {
-                  const ws = toMs(sp.getAttribute("begin"));
-                  const we = toMs(sp.getAttribute("end"));
-                  const wt = sp.textContent || "";
-                  lineText += wt;
-                  if (wt) words.push({ start: ws, end: we, text: wt });
-                }
+                const inner = collectTimedWords(node);
+                lineText += inner.text;
+                words.push(...inner.words);
               } else {
                 const wt = node.textContent || "";
                 lineText += wt;
@@ -240,12 +299,16 @@
           }
 
           const cleanText = lineText.trim();
-          if (!cleanText) return null;
+          const cleanBgText = bgText.trim();
+          if (!cleanText && !cleanBgText) return null;
           return {
             start: begin,
             end,
-            text: cleanText,
+            text: cleanText || cleanBgText,
             words: words.length > 0 ? words : null,
+            bgText: cleanText && cleanBgText ? cleanBgText : "",
+            bgWords: cleanText && bgWords.length > 0 ? bgWords : null,
+            isAltVoice,
           };
         })
         .filter(Boolean)
@@ -805,9 +868,18 @@
             emitToHost("rpc_result", id, { ok: true, lines: [] });
             break;
           }
-          const res = await apiGet(mk, `/v1/catalog/${sf}/songs/${songId}/lyrics`).catch(() => null);
-          const item = res && res.data && res.data[0] ? res.data[0] : null;
-          const ttml = item && item.attributes ? item.attributes.ttml : "";
+          // Prefer Apple Music syllable-lyrics (word-by-word Sing karaoke TTML), fallback to line-level lyrics
+          let ttml = "";
+          const sylRes = await apiGet(mk, `/v1/catalog/${sf}/songs/${songId}/syllable-lyrics`).catch(() => null);
+          const sylItem = sylRes && sylRes.data && sylRes.data[0] ? sylRes.data[0] : null;
+          if (sylItem && sylItem.attributes && sylItem.attributes.ttml) {
+            ttml = sylItem.attributes.ttml;
+          }
+          if (!ttml) {
+            const res = await apiGet(mk, `/v1/catalog/${sf}/songs/${songId}/lyrics`).catch(() => null);
+            const item = res && res.data && res.data[0] ? res.data[0] : null;
+            ttml = item && item.attributes ? item.attributes.ttml : "";
+          }
           emitToHost("rpc_result", id, {
             ok: true,
             lines: parseTtmlLyrics(ttml),

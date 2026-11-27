@@ -364,12 +364,15 @@ const el = {
   timeCur: document.getElementById("time-cur"),
   timeTot: document.getElementById("time-tot"),
   volumeSlider: document.getElementById("volume-slider"),
+  btnVolMute: document.getElementById("btn-vol-mute"),
+  volIcoOn: document.getElementById("vol-ico-on"),
+  volIcoMute: document.getElementById("vol-ico-mute"),
   // Mini player
   miniArtwork: document.getElementById("mini-artwork"),
   miniPlaceholder: document.getElementById("mini-placeholder"),
   miniTitle: document.getElementById("mini-title"),
   miniArtist: document.getElementById("mini-artist"),
-  miniProgressFill: document.getElementById("mini-progress-fill"),
+  miniProgressSlider: document.getElementById("mini-progress-slider"),
   miniIconPlay: document.getElementById("mini-icon-play"),
   miniIconPause: document.getElementById("mini-icon-pause"),
   btnMiniPin: document.getElementById("btn-mini-pin"),
@@ -429,7 +432,10 @@ function syncSettingsControls() {
   const miniOpRange = document.getElementById("set-miniOpacity");
   const miniOpVal = document.getElementById("val-miniOpacity");
   const opNum = Number(settings.miniOpacity ?? 40);
-  if (miniOpRange) miniOpRange.value = String(opNum);
+  if (miniOpRange) {
+    miniOpRange.value = String(opNum);
+    setSliderFill(miniOpRange);
+  }
   if (miniOpVal) miniOpVal.textContent = String(opNum);
 
   for (const key of ["fluidGlow", "artworkAccent", "cardMotion", "karaokeLyrics", "lyricsBlur", "miniOnTop", "discordRpc", "autoCheckUpdate"]) {
@@ -466,12 +472,18 @@ function syncSettingsControls() {
 
   const blurRange = document.getElementById("set-blurStrength");
   const blurVal = document.getElementById("val-blurStrength");
-  if (blurRange) blurRange.value = String(settings.blurStrength);
+  if (blurRange) {
+    blurRange.value = String(settings.blurStrength);
+    setSliderFill(blurRange);
+  }
   if (blurVal) blurVal.textContent = String(settings.blurStrength);
 
   const lyrRange = document.getElementById("set-lyricsSize");
   const lyrVal = document.getElementById("val-lyricsSize");
-  if (lyrRange) lyrRange.value = String(settings.lyricsSize);
+  if (lyrRange) {
+    lyrRange.value = String(settings.lyricsSize);
+    setSliderFill(lyrRange);
+  }
   if (lyrVal) lyrVal.textContent = String(settings.lyricsSize);
 
   el.btnMiniPin.classList.toggle("active", Boolean(settings.miniOnTop));
@@ -1197,12 +1209,50 @@ document.getElementById("btn-mini-next").addEventListener("click", () => rpc("ne
 el.btnShuffle.addEventListener("click", () => rpc("toggleShuffle").catch(console.error));
 el.btnRepeat.addEventListener("click", () => rpc("cycleRepeat").catch(console.error));
 
+function setSliderFill(input, pctOverride = null) {
+  if (!input) return;
+  let pct = pctOverride;
+  if (pct === null) {
+    const min = Number(input.min || 0);
+    const max = Number(input.max || 100);
+    const val = Number(input.value || 0);
+    pct = max > min ? ((val - min) / (max - min)) * 100 : 0;
+  }
+  const clamped = Math.max(0, Math.min(100, Number(pct) || 0));
+  input.style.setProperty("--fill", `${clamped.toFixed(2)}%`);
+}
+
+let showRemainingTime = true;
+let lastNonZeroVolume = 100;
+
+function updateVolumeUi(volPct) {
+  const v = Math.max(0, Math.min(100, Math.round(Number(volPct) || 0)));
+  if (v > 0) lastNonZeroVolume = v;
+  setSliderFill(el.volumeSlider, v);
+  if (el.volIcoOn && el.volIcoMute) {
+    el.volIcoOn.classList.toggle("hidden", v === 0);
+    el.volIcoMute.classList.toggle("hidden", v > 0);
+  }
+}
+
 el.progressSlider.addEventListener("input", () => {
   isScrubbing = true;
+  const ratio = Number(el.progressSlider.value) / 1000;
+  setSliderFill(el.progressSlider, ratio * 100);
   if (lastDurSec > 0) {
-    el.timeCur.textContent = formatTimeSec((Number(el.progressSlider.value) / 1000) * lastDurSec);
+    const sec = ratio * lastDurSec;
+    el.timeCur.textContent = formatTimeSec(sec);
+    el.timeTot.textContent = showRemainingTime ? `-${formatTimeSec(Math.max(0, lastDurSec - sec))}` : formatTimeSec(lastDurSec);
   }
 });
+
+if (el.timeTot) {
+  el.timeTot.addEventListener("click", () => {
+    showRemainingTime = !showRemainingTime;
+    lastRenderedTotText = "";
+    renderPlaybackFrame();
+  });
+}
 
 el.progressSlider.addEventListener("change", () => {
   isScrubbing = false;
@@ -1216,13 +1266,45 @@ el.progressSlider.addEventListener("change", () => {
   }
 });
 
+if (el.miniProgressSlider) {
+  el.miniProgressSlider.addEventListener("input", () => {
+    isScrubbing = true;
+    const ratio = Number(el.miniProgressSlider.value) / 1000;
+    setSliderFill(el.miniProgressSlider, ratio * 100);
+  });
+  el.miniProgressSlider.addEventListener("change", () => {
+    isScrubbing = false;
+    if (lastDurationValid()) {
+      const targetSec = (Number(el.miniProgressSlider.value) / 1000) * lastDurSec;
+      lastPosSec = targetSec;
+      lastSyncAt = performance.now();
+      ignoreRemoteTimeUntil = lastSyncAt + 900;
+      syncDiscordPresence(true);
+      rpc("seek", { sec: targetSec }).catch(console.error);
+    }
+  });
+}
+
 function lastDurationValid() {
   return lastDurSec > 0;
 }
 
 el.volumeSlider.addEventListener("input", () => {
-  rpc("setVolume", { volume: Number(el.volumeSlider.value) / 100 }).catch(console.error);
+  const v = Number(el.volumeSlider.value);
+  updateVolumeUi(v);
+  rpc("setVolume", { volume: v / 100 }).catch(console.error);
 });
+
+if (el.btnVolMute) {
+  el.btnVolMute.addEventListener("click", () => {
+    const cur = Number(el.volumeSlider.value || 0);
+    const next = cur > 0 ? 0 : (lastNonZeroVolume > 0 ? lastNonZeroVolume : 100);
+    el.volumeSlider.value = String(next);
+    updateVolumeUi(next);
+    rpc("setVolume", { volume: next / 100 }).catch(console.error);
+  });
+}
+updateVolumeUi(Number(el.volumeSlider.value || 100));
 
 // Render Helpers
 function renderCards(items) {
@@ -1790,18 +1872,37 @@ function renderLyricLines() {
   const useKaraoke = Boolean(settings.karaokeLyrics);
   el.lyricsScroll.innerHTML = lyricLines
     .map((line, idx) => {
+      const cls = ["lyric-line"];
+      if (line.isAltVoice) cls.push("is-alt-voice");
+      let mainHtml = "";
       if (useKaraoke && Array.isArray(line.words) && line.words.length > 0) {
-        const spans = line.words
+        cls.push("has-words");
+        mainHtml = line.words
           .map((w, wIdx) => `<span class="lyric-word" data-widx="${wIdx}">${escapeHtml(w.text)}</span>`)
           .join("");
-        return `<div class="lyric-line has-words" data-idx="${idx}">${spans}</div>`;
+      } else {
+        mainHtml = escapeHtml(line.text);
       }
-      return `<div class="lyric-line" data-idx="${idx}">${escapeHtml(line.text)}</div>`;
+      let bgHtml = "";
+      if (line.bgText) {
+        if (useKaraoke && Array.isArray(line.bgWords) && line.bgWords.length > 0) {
+          const bgSpans = line.bgWords
+            .map((w, wIdx) => `<span class="lyric-word lyric-bg-word" data-bg-widx="${wIdx}">${escapeHtml(w.text)}</span>`)
+            .join("");
+          bgHtml = `<div class="lyric-bg-row">${bgSpans}</div>`;
+        } else {
+          bgHtml = `<div class="lyric-bg-row">${escapeHtml(line.bgText)}</div>`;
+        }
+      }
+      return `<div class="${cls.join(" ")}" data-idx="${idx}">${mainHtml}${bgHtml}</div>`;
     })
     .join("");
 
   cachedLyricNodes = Array.from(el.lyricsScroll.querySelectorAll(".lyric-line"));
-  cachedWordNodes = cachedLyricNodes.map((node) => Array.from(node.querySelectorAll(".lyric-word")));
+  cachedWordNodes = cachedLyricNodes.map((node) => ({
+    main: Array.from(node.querySelectorAll(".lyric-word:not(.lyric-bg-word)")),
+    bg: Array.from(node.querySelectorAll(".lyric-bg-word")),
+  }));
 
   cachedLyricNodes.forEach((node) => {
     node.addEventListener("click", () => {
@@ -2036,7 +2137,9 @@ listen("engine-state", (event) => {
   }
 
   if (typeof st.volume === "number" && document.activeElement !== el.volumeSlider) {
-    el.volumeSlider.value = String(Math.round(st.volume * 100));
+    const volPct = Math.round(st.volume * 100);
+    el.volumeSlider.value = String(volPct);
+    updateVolumeUi(volPct);
   }
 
   const np = st.nowPlaying;
@@ -2177,10 +2280,11 @@ function renderPlaybackFrame() {
   if (!isScrubbing) {
     const ratio = lastDurSec > 0 ? Math.min(1, clamped / lastDurSec) : 0;
     if (isMiniMode) {
-      const miniPct = `${(ratio * 100).toFixed(1)}%`;
-      if (miniPct !== lastRenderedMiniPct) {
-        lastRenderedMiniPct = miniPct;
-        el.miniProgressFill.style.width = miniPct;
+      const miniVal = String(Math.round(ratio * 1000));
+      if (miniVal !== lastRenderedMiniPct && el.miniProgressSlider) {
+        lastRenderedMiniPct = miniVal;
+        el.miniProgressSlider.value = miniVal;
+        setSliderFill(el.miniProgressSlider, ratio * 100);
       }
     } else {
       const curStr = formatTimeSec(clamped);
@@ -2188,7 +2292,9 @@ function renderPlaybackFrame() {
         lastRenderedCurText = curStr;
         el.timeCur.textContent = curStr;
       }
-      const totStr = formatTimeSec(lastDurSec);
+      const totStr = showRemainingTime && lastDurSec > 0
+        ? `-${formatTimeSec(Math.max(0, lastDurSec - clamped))}`
+        : formatTimeSec(lastDurSec);
       if (totStr !== lastRenderedTotText) {
         lastRenderedTotText = totStr;
         el.timeTot.textContent = totStr;
@@ -2197,6 +2303,7 @@ function renderPlaybackFrame() {
       if (sliderVal !== lastRenderedSliderVal) {
         lastRenderedSliderVal = sliderVal;
         el.progressSlider.value = sliderVal;
+        setSliderFill(el.progressSlider, ratio * 100);
       }
     }
   }
@@ -2222,10 +2329,11 @@ function renderPlaybackFrame() {
         const isNear = activeLyricIdx >= 0 && Math.abs(idx - activeLyricIdx) === 1;
         node.classList.toggle("active", isActive);
         node.classList.toggle("near-active", isNear);
-        // Reset previous line word progress cleanly when moving to next line
-        if (idx === prevIdx && cachedWordNodes[idx]) {
-          for (const wNode of cachedWordNodes[idx]) {
-            const resetVal = idx < activeLyricIdx ? "114%" : "-14%";
+        // Reset word progress cleanly on inactive lines
+        if (!isActive && cachedWordNodes[idx]) {
+          const allWords = [...(cachedWordNodes[idx].main || []), ...(cachedWordNodes[idx].bg || [])];
+          const resetVal = idx < activeLyricIdx ? "114%" : "-14%";
+          for (const wNode of allWords) {
             if (wNode._prog !== resetVal) {
               wNode._prog = resetVal;
               wNode.style.setProperty("--wprog", resetVal);
@@ -2254,15 +2362,14 @@ function renderPlaybackFrame() {
       }
     }
 
-    // Animate feathered word-by-word karaoke sweep inside active line
+    // Animate feathered word-by-word karaoke sweep inside active line (lead + backing vocals)
     if (settings.karaokeLyrics && activeLyricIdx >= 0) {
-      const activeLineData = lyricLines[activeLyricIdx];
-      const wordNodes = cachedWordNodes[activeLyricIdx];
-      if (activeLineData && Array.isArray(activeLineData.words) && wordNodes) {
-        for (let wIdx = 0; wIdx < activeLineData.words.length; wIdx++) {
-          const wNode = wordNodes[wIdx];
+      const sweepWords = (wordList, nodes) => {
+        if (!Array.isArray(wordList) || !nodes) return;
+        for (let wIdx = 0; wIdx < wordList.length; wIdx++) {
+          const wNode = nodes[wIdx];
           if (!wNode) continue;
-          const w = activeLineData.words[wIdx];
+          const w = wordList[wIdx];
           const ws = w.start ?? 0;
           const we = w.end ?? ws + 250;
           let prog;
@@ -2288,6 +2395,12 @@ function renderPlaybackFrame() {
             wNode.classList.toggle("word-active", state === 1);
           }
         }
+      };
+      const activeLineData = lyricLines[activeLyricIdx];
+      const wordGroup = cachedWordNodes[activeLyricIdx];
+      if (activeLineData && wordGroup) {
+        sweepWords(activeLineData.words, wordGroup.main);
+        sweepWords(activeLineData.bgWords, wordGroup.bg);
       }
     }
   }
@@ -2367,7 +2480,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 // Auto-Updater State & Actions
-let currentAppVersion = "0.2.2";
+let currentAppVersion = "0.2.3";
 let availableUpdate = null;
 let updateBannerDismissed = false;
 let updaterUiState = { stage: "idle", version: "", pct: null, downloaded: 0, error: "" };
